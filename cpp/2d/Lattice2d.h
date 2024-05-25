@@ -117,12 +117,14 @@ public:
     VectorXi PByDistanceFar;   // store distances between particles
     VectorXi XPByDistanceFar;   // store distances between particles
     VectorXi YPByDistanceFar;   // store distances between particles
-    VectorXd R0jBydistance;   // store distances between particles
-    VectorXi PByDistance;   // store distances between particles
-    VectorXi XPByDistance;   // store distances between particles
-    VectorXi YPByDistance;   // store distances between particles
+    mutable VectorXd R0jBydistance;   // store distances between particles
+    mutable VectorXi PByDistance;   // store distances between particles
+    mutable VectorXi XPByDistance;   // store distances between particles
+    mutable VectorXi YPByDistance;   // store distances between particles
     VectorXd Jmax1p;   // store distances between particles
     VectorXd JmaxByDistance;   // store distances between particles
+    double DistanceVec1p_n;
+    VectorXd JmaxCumulNormalizedVecToSave;
 
 
     VectorXi XPbyIndex;   // store distances between particles
@@ -138,6 +140,19 @@ public:
     VectorXi MapR0Sub22;          // MacIsaac version of map(0,j) = k for honeycomb
     VectorXi CounterR;      // counts number of repeated distances in DistanceVec
     Matrix3d Jself;
+    MatrixXd PBoxes;
+    int NBx;
+    int NBy;
+    int NBoxes;
+    int BoxSize;
+    VectorXi XBoxes;
+    VectorXi YBoxes;
+    VectorXi BoxesIdxToPIdx;
+    VectorXd R0jBoxBydistance;   // store distances between particles
+    VectorXi PBoxByDistance;   // store distances between particles
+    VectorXi XBoxPByDistance;   // store distances between particles
+    VectorXi YBoxPByDistance;   // store distances between particles
+    mutable VectorXi BoxIndices;
     const bool isHoneycombFromTriangular;
 
     explicit Lattice2d(const int alpha, const Matrix2d &t,
@@ -188,7 +203,10 @@ public:
     void decreaseDipolarStrength();
     void calcNearestNeighbours();
     void setJmax1p();
+    void setBoxes();
+    void getIndicesInsideBox(int ib) const;
     void calcNeighboursbyNearGroupEnergyProportion(double proportion);
+    void calcNeighboursbyDistannce(double Distance);
 };
 
 

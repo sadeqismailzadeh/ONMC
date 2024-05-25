@@ -46,6 +46,15 @@ void Simulation::setupSimulation(){
     Prop.isEquidistantTemperatureInCriticalRegionSimulation +
     Prop.isHistogramSimulation == 1);
 
+    rassert(Prop.isSaveEquilibriumState + Prop.isLoadEquilibriumState <= 1);
+    rassert(Prop.isNearGroupByMaxEnergyProportion + Prop.isNearGroupByDistance <= 1);
+
+    if (Prop.isCalcSelectedBondsProbability){
+        rassert(!Prop.isNearGroup);
+        rassert(!Prop.isBoxes);
+        rassert(!Prop.isMacIsaacMethod);
+    }
+
     if (Prop.isNearGroup && Prop.isLRONMethod) {
         rassert(Prop.isClockMethod || Prop.isSCOMethod || Prop.isTomitaMethod);
     }
@@ -84,9 +93,9 @@ void Simulation::setupSimulation(){
         if (Prop.isSCOMethodNearGroupBuiltIn){
             rassert(Prop.isNearGroup);
         }
-        if (Prop.isWalkerAliasMethod){
-            rassert(!Prop.isSCOMethodOverrelaxationBuiltIn);
-        }
+//        if (Prop.isWalkerAliasMethod){
+//            rassert(!Prop.isSCOMethodOverrelaxationBuiltIn);
+//        }
         rassert(Prop.SCOMethodJmaxIncreaseFactor >= 1);
     }
 
@@ -141,12 +150,43 @@ void Simulation::parallel() {
     bool isParallel = false;
     bool isParallelNew = true;
 
+    if (Prop.isNearGroup && (Prop.isNearGroupByMaxEnergyProportion || Prop.isNearGroupByDistance)
+        && !Prop.isMacIsaacMethod) {
+        H5Easy::File infoFile(folderpath + "/info.h5"s,
+                              H5Easy::File::OpenOrCreate);
+        H5Easy::dump(infoFile, "/NearGroupDistance"s, Lat1.DistanceVec1p_n,
+                     H5Easy::DumpOptions(H5Easy::Compression(9)));
+        H5Easy::dump(infoFile, "/Neighbours.size()"s, Lat1.Neighbours.size(),
+                     H5Easy::DumpOptions(H5Easy::Compression(9)));
+        H5Easy::dump(infoFile, "/R0j"s, Lat1.R0jBydistance,
+                     H5Easy::DumpOptions(H5Easy::Compression(9)));
+        H5Easy::dump(infoFile, "/JmaxVecCumulNormalized"s, Lat1.JmaxCumulNormalizedVecToSave,
+                     H5Easy::DumpOptions(H5Easy::Compression(9)));
+        H5Easy::dump(infoFile, "/JmaxByDistance"s, Lat1.JmaxByDistance,
+                     H5Easy::DumpOptions(H5Easy::Compression(9)));
+    }
+
     if (!Prop.isSaveSamplesToSepareteFolders) {
         H5Easy::File timeSeriesHdf5Ens(folderpath + "/Results.h5"s,
                                        H5Easy::File::OpenOrCreate);
         H5Easy::dump(timeSeriesHdf5Ens, "/Nensemble"s, Nensemble,
                      H5Easy::DumpOptions(H5Easy::Compression(9)));
     }
+
+    if (Prop.isSaveEquilibriumState) {
+        string filePath = folderpath + "/.."s + "/EquilibriumState_L="s + to_string(Lat1.L1) + ".h5"s;
+        H5Easy::File EQStateHdf5Ens(filePath, H5Easy::File::Overwrite);
+        H5Easy::dump(EQStateHdf5Ens, "/TemperatureList"s, Prop.TemperatureList,
+                     H5Easy::DumpOptions(H5Easy::Compression(9)));
+    }
+
+    if (Prop.isCalcSelectedBondsProbability){
+        H5Easy::File BondsProbFile(folderpath + "/NeighborsDistancesSorted.h5"s,
+                                    H5Easy::File::OpenOrCreate);
+        H5Easy::dump(BondsProbFile, "/R0j"s, Lat1.R0jBydistance,
+                     H5Easy::DumpOptions(H5Easy::Compression(9)));
+    }
+
 //    #ifndef NDEBUG
 //        if (Nthreads == 1){
 //            isParallel = false;
@@ -213,8 +253,8 @@ void Simulation::parallel() {
             auto MC2dSample = make_unique<MC2d>(Lat1, seed, Prop);
             #pragma omp critical (setID)
             {
-                MC2dSample->init();
                 MC2dSample->setId();
+                MC2dSample->init();
                 MC2dSample->setParentFolderPath(folderpath);
 //                mcs[j].init();
 //                mcs[j].setId();
@@ -369,7 +409,8 @@ void Simulation::save(long elapsedCPU, const vector<ArrayXXd> &StatDataMeanErr, 
                 << std::setfill('0') << std::setw(2) << secsCPU << endl
                 << "CPU seconds = " << ((elapsedCPU)) << endl
                 << "CPU hour = " << ((elapsedCPU)/3600) << endl
-                << "runtime in seconds = " << elapsed << endl;
+                << "runtime in seconds = " << elapsed << endl
+                << "info on folder path = " << endl << simulationInfoOnFolderPath <<endl;
         if (Prop.isFieldOn && (Prop.ControlParamType == 'T')){
             InfoOut << "h = " << endl << Prop.hfield;
             cout << endl << "h = " << endl << Prop.hfield << endl;
@@ -381,7 +422,7 @@ void Simulation::save(long elapsedCPU, const vector<ArrayXXd> &StatDataMeanErr, 
     // TODO save simulation type  metropolis, neighbours, Clock, Overrelaxation
     // TODO save default seed
 
-    auto mysetw = setw(11);
+    auto mysetw = setw(15);
     cout << std::right << setprecision(5) << std::fixed << endl;
 
     ostringstream MeanXWithNamesoutSStream;
@@ -398,9 +439,9 @@ void Simulation::save(long elapsedCPU, const vector<ArrayXXd> &StatDataMeanErr, 
          "Mvect" << mysetw << "mx" << mysetw << "my" << mysetw << "mz"
          << mysetw <<  "mFE" << mysetw << "XFE" << mysetw << "UFE"
          << mysetw <<  "mFEPlane" << mysetw << "XFEPlane" << mysetw << "UFEPlane"
-         << mysetw << "mTpp" << mysetw << "tau" << mysetw << "Pacc_TOT"
+         << mysetw << "mTpp" << mysetw << "tauM" << mysetw << "tauE" << mysetw << "tau" << mysetw << "Pacc_TOT"
          << mysetw << "Pacc_MC" << mysetw << "Pacc_OR"<< mysetw << "runtime"
-         << mysetw << "t_eff"<< mysetw << "run/Step" << endl;
+         << mysetw << "t_eff"<< mysetw << "run/Step"<< mysetw << "complexity/N" << mysetw << "RND/step/N" << endl;
     // TODO print info in column (table like) fashion to be able show more info more easily
     for (int i = 0; i < StatDataMeanErr[0].rows(); ++i) {
         for (int j = 0; j < StatDataMeanErr[0].cols(); ++j) {
@@ -456,48 +497,57 @@ const string& Simulation::makeFolderPath() {
     MCsSStream << MCs;
     folderpath = relpath + DateTimeStr;
 
+    simulationInfoOnFolderPath.clear();
     if (Prop.isMacIsaacMethod){
-        folderpath += "_MacIsaac"s;
+        simulationInfoOnFolderPath += "_MacIsaac"s;
     } else if (Prop.isClockMethod){
-        folderpath += "_Clock"s;
+        simulationInfoOnFolderPath += "_Clock"s;
         if (Prop.isWalkerAliasMethod){
-            folderpath += "_Walker"s;
+            simulationInfoOnFolderPath += "_Walker"s;
         }
     } else if (Prop.isSCOMethod){
-        folderpath += "_SCO"s;
+        simulationInfoOnFolderPath += "_SCO"s;
         if (Prop.isWalkerAliasMethod){
-            folderpath += "_Walker"s;
+            simulationInfoOnFolderPath += "_Walker"s;
         }
         if (Prop.isSCOMethodOverrelaxationBuiltIn){
-            folderpath += "_builtInOR"s;
+            simulationInfoOnFolderPath += "_builtInOR"s;
+        }
+        if (Prop.isSCOMethodPreset){
+            simulationInfoOnFolderPath += "_PS="s + to_string(Prop.SCOPresetReshuffleInterval);
         }
         std::stringstream stream;
         stream << std::fixed << std::setprecision(2) << Prop.SCOMethodJmaxIncreaseFactor;
         std::string IncreaseFactor = stream.str();
-        folderpath += "_IF="s + IncreaseFactor;
+        simulationInfoOnFolderPath += "_IF="s + IncreaseFactor;
     } else if (Prop.isTomitaMethod){
-        folderpath += "_Tomita"s ;
+        simulationInfoOnFolderPath += "_Tomita"s ;
         std::stringstream stream;
         stream << std::fixed << std::setprecision(2) << Prop.TomitaAlphaTilde;
         std::string alphaTilde = stream.str();
-        folderpath += "_a="s + alphaTilde;
+        simulationInfoOnFolderPath += "_a="s + alphaTilde;
     } else if (Prop.isNeighboursMethod){
-        folderpath += "_Neighbours"s;
+        simulationInfoOnFolderPath += "_Neighbours"s;
     }
 
     if (Prop.isNearGroup && (Prop.isClockMethod || Prop.isSCOMethod || Prop.isTomitaMethod)) {
         if((Prop.isSCOMethod || Prop.isTomitaMethod) &&
            (Prop.isSCOMethodNearGroupBuiltIn || Prop.isTomitaMethodNearGroupBuiltIn)){
-            folderpath += "_BuiltIn"s;
+            simulationInfoOnFolderPath += "_BuiltIn"s;
         }
-        folderpath += "_NearGroup="s;
+        simulationInfoOnFolderPath += "_NearGroup="s;
         if (Prop.isNearGroupByMaxEnergyProportion) {
             std::stringstream stream;
             stream << std::fixed << std::setprecision(3) << Prop.NearGroupMaxEnergyProportion;
             std::string NearGroupMaxEnergyProportionStr = stream.str();
-            folderpath += NearGroupMaxEnergyProportionStr;
-        } else {
-            folderpath += to_string(Prop.NthNeighbour);
+            simulationInfoOnFolderPath += NearGroupMaxEnergyProportionStr;
+        } else if (Prop.isNearGroupByDistance) {
+            std::stringstream stream;
+            stream << std::fixed << std::setprecision(3) << Prop.NearGroupDistance;
+            std::string NearGroupMaxEnergyProportionStr = stream.str();
+            simulationInfoOnFolderPath += NearGroupMaxEnergyProportionStr;
+        } else{
+            simulationInfoOnFolderPath += to_string(Prop.NthNeighbour);
         }
     }
 
@@ -505,40 +555,41 @@ const string& Simulation::makeFolderPath() {
         std::stringstream stream;
         stream << std::fixed << std::setprecision(3) << Prop.DipolarStrengthToExchangeRatio;
         std::string DtoJRatio = stream.str();
-        folderpath += "_DtoJ="s + DtoJRatio;
+        simulationInfoOnFolderPath += "_DtoJ="s + DtoJRatio;
     }
 
     if (Prop.isOverRelaxationMethod){
-        folderpath += "_OR"s + to_string(Prop.OverrelaxationSteps) + ";" + to_string(Prop.MetropolisSteps);
+        simulationInfoOnFolderPath += "_OR"s + to_string(Prop.OverrelaxationSteps) + ";" + to_string(Prop.MetropolisSteps);
     }
 
-    folderpath += "_"s + LatticeTypeName + "_L="s + to_string(Lat1.L1) +
+    simulationInfoOnFolderPath += "_"s + LatticeTypeName + "_L="s + to_string(Lat1.L1) +
                  "_thread="s + to_string(Nthreads) +"_MCs="s + MCsSStream.str() + "_ens=" + to_string(Nensemble);
 
     if (Prop.ControlParamType == 'T'){
-//        folderpath += "_Type=T"s;
+//        simulationInfoOnFolderPath += "_Type=T"s;
     } else if (Prop.ControlParamType == 'h'){
-        folderpath += "_Type=h"s;
+        simulationInfoOnFolderPath += "_Type=h"s;
     }
     if (Prop.isFieldOn && (Prop.ControlParamType == 'T')){
-        folderpath += "_FieldOn"s;
+        simulationInfoOnFolderPath += "_FieldOn"s;
     }
 
     if (Prop.isFiniteDiffSimulation){
-        folderpath += "_diff"s;
+        simulationInfoOnFolderPath += "_diff"s;
     } else if (Prop.isEquidistantTemperatureInCriticalRegionSimulation){
-        folderpath += "_CEqui"s;
+        simulationInfoOnFolderPath += "_CEqui"s;
     } else if (Prop.isHistogramSimulation){
-        folderpath += "_Hist"s;
+        simulationInfoOnFolderPath += "_Hist"s;
         std::stringstream stream;
         stream << std::fixed << std::setprecision(6) << Prop.PcEstimate;
         std::string THistogram = stream.str();
-        folderpath += "_T="s + THistogram;
+        simulationInfoOnFolderPath += "_T="s + THistogram;
     }
 
     if (Prop.isNeighboursMethod) {
-        folderpath += "_Cutoff"s;
+        simulationInfoOnFolderPath += "_Cutoff"s;
     }
+    folderpath += simulationInfoOnFolderPath;
     return folderpath;
 }
 

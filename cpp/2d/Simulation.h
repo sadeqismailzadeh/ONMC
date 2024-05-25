@@ -21,7 +21,6 @@
 #include "Eigen/Dense"
 #include "MCProperties.h"
 #include <highfive/H5Easy.hpp>
-
 #include <exception>
 //#include <cblas.h>
 
@@ -49,6 +48,7 @@
 class Simulation{
 private:
     string folderpath;
+    string simulationInfoOnFolderPath;
     string LatticeTypeName;
     SimpleStopWatch StopWatch;
     void createFolder();

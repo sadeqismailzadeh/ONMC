@@ -42,7 +42,7 @@ MC2d::MC2d(const Lattice2d &lat, const int64_t &seed, const MCProperties  &prope
 //    Jself << Jxx(0,0), Jxy(0,0), Jxy(0,0), Jyy(0,0);
 
     //taking data
-    StatisticalData.setZero(1000, 28);
+    StatisticalData.setZero(1000, 32);
     LastTempIndex = 0;
 
     //eigenvectors
@@ -106,7 +106,15 @@ MC2d::MC2d(const Lattice2d &lat, const int64_t &seed, const MCProperties  &prope
     AcceptedRegularParticleSteps = 0;
     TotalOverrelaxedParticleSteps = 0;
     AcceptedOverrelaxedParticleSteps = 0;
+    complexitySum = 0;
+    RNDGenerationSum = 0;
 
+    complexityAcceptSum = 0;
+    RNDGenerationAcceptSum = 0;
+
+    AcceptedBondsSum.setZero(N - 1);
+    SelectedBondsSum.setZero(N - 1);
+    SelectedBondsLocal.setZero(N - 1);
 
 
     UAntiAlignedWithHSum = 0;
@@ -114,6 +122,9 @@ MC2d::MC2d(const Lattice2d &lat, const int64_t &seed, const MCProperties  &prope
     EIncreaserReducerTotalSum = 0;
     attemptSum = 0;
     FineTuneNum = 0;
+
+
+    SCOReshuffleCounter = 0;
 
     jrejMat.resize(N, std::vector<double>(1, 0));
     jrejVecBool.resize(N, false);
@@ -152,8 +163,9 @@ void MC2d::resetLastInstanceIndex() {
 
 
 void MC2d::randomizeAllSpins(){
-    const double PI = acos(-1);
-    double Theta = PI/3;
+//    const double PI = acos(-1);
+//    double Theta = PI/3;
+    double Theta = Prop.InitialAlignment;
     for (int i = 0; i < N; i++) {
         if (Prop.isDipolesInitializedOrdered){
             Ux(i) = cos(Theta);
@@ -164,6 +176,18 @@ void MC2d::randomizeAllSpins(){
             Uy(i) = UiNewY;
         }
     }
+}
+
+void MC2d::loadEquilibriumState(){
+    #pragma omp critical (Hdf5LoadFiles)
+    {
+        string filePath = ParentFolderPath + "/.."s + "/EquilibriumState_L="s + to_string(Lat.L1) + ".h5"s;
+        H5Easy::File EQStateHdf5Ens(filePath, H5Easy::File::OpenOrCreate);
+        string dataPath ="/"s + to_string(Temperature) + "/"s + to_string(InstanceIndex);
+        Ux = H5Easy::load<Eigen::VectorXd>(EQStateHdf5Ens, dataPath +  "/EqulibriumState/Ux"s);
+        Uy = H5Easy::load<Eigen::VectorXd>(EQStateHdf5Ens, dataPath +  "/EqulibriumState/Uy"s);
+    }
+
 }
 
 
@@ -208,6 +232,9 @@ void MC2d::run1MetropolisStep() {
 //    shuffle(ParticleList.begin(), ParticleList.end(), gen);
 //    for (int i : ParticleList) {
     for (int i = 0; i < N; i++) {
+        TotalUpdateSum++;
+        complexityLocalSum = 0;
+        RNDGenerationLocalSum = 0;
 //    for (int c = 0; c < N; c++) {
 //        int i = intDis(gen);
         Debug_totali++;
@@ -218,6 +245,7 @@ void MC2d::run1MetropolisStep() {
         double dE = dErot(i);
 //        assert(almostEquals(dErot(i), dENN(i)));
         assert(almostEquals(1/Temperature, InvTemperature));
+        RNDGenerationSum += 1;
         if (dE < 0 || (realDis(gen) < exp(-dE * InvTemperature))) {
 //        if (realDis(gen) < 0.5*(1-tanh(0.5*dE * InvTemperature))) {
             updateField(i);
@@ -225,6 +253,7 @@ void MC2d::run1MetropolisStep() {
             Debug_Iaccepted++;
             AcceptedRegularParticleSteps += 1;
             CounterAccceptence++;
+            AcceptSum++;
 //        } else {
 //            overRelaxateUiNew(i);
 //            updateField(i);
@@ -293,6 +322,7 @@ void MC2d::run1OverRelaxationStep() {
 //    shuffle(ParticleList.begin(), ParticleList.end(), gen);
 //    for (int i : ParticleListSorted) {
     for (int i = 0; i < N; ++i) {
+        TotalUpdateSum++;
 //    for (int c = 0; c < N; c++) {
 //        int i = intDis(gen);
 //        double theta_i = atan2(Uy(i), Ux(i));
@@ -391,6 +421,8 @@ void MC2d::updateField(const int i) {
         const int L1 = Lat.L1;
         const int L2 = Lat.L2;
         if (Prop.isStoreNeighboursForAllPariticles){
+            complexitySum += Lat.Neighbours.size();
+            complexityLocalSum += Lat.Neighbours.size();
             for (int j = 0; j < Lat.Neighbours.size(); ++j) {
                 const int pj = Lat.NeighboursMat(j, i);
 //                assert(almostEquals(Lat.getMinDistance(0,Lat.Neighbours(j)), Lat.getMinDistance(i, pj)));
@@ -400,6 +432,8 @@ void MC2d::updateField(const int i) {
 //                Hy(pj) += Lat.JxyMatn(j, i) * dMx + Lat.JyyMatn(j, i) * dMy;
             }
         } else {
+            complexitySum += Lat.Neighbours.size();
+            complexityLocalSum += Lat.Neighbours.size();
             for (int j = 0; j < Lat.Neighbours.size(); ++j) {
                 const int xj0 = Lat.Xn0(j) + xi;
                 const int yj0 = Lat.Yn0(j) + yi;
@@ -418,6 +452,8 @@ void MC2d::updateField(const int i) {
             }
         }
     } else if (Prop.LatticeType != 'h' && Prop.isMacIsaacMethod) {
+        complexitySum += N;
+        complexityLocalSum += N;
         int rowspin = i / Lat.L1;
         int colspin = i % Lat.L1;
         const int L1 = Lat.L1;
@@ -432,6 +468,8 @@ void MC2d::updateField(const int i) {
             }
         }
     } else if (Prop.LatticeType == 'h' && Prop.isMacIsaacMethod && Lat.isHoneycombFromTriangular) {
+        complexitySum += N;
+        complexityLocalSum += N;
 //        cout << "here";
         const int L1 = Lat.L1;
         const int L2 = Lat.L2;
@@ -472,6 +510,8 @@ void MC2d::updateField(const int i) {
         }
 
     } else {
+        complexitySum += N;
+        complexityLocalSum += N;
         int a = 0;
         for (int j = 0; j < N; j++) {
             Hx(j) += Jxx(j, i) * dMx +  Jxy(j, i) * dMy;
@@ -479,7 +519,7 @@ void MC2d::updateField(const int i) {
         }
     }
 
-    if (Prop.isHavingExchangeInteraction && !Prop.isExchangeInteractionCombinedWithJ){
+    if (Prop.isHavingExchangeInteraction && !Prop.isExchangeInteractionCombinedWithDij){
         //        cout << "updateField NeighboursMethod" <<endl;
 //    if (false){
 //        Hx(i)  += Jself(0,0) * dMx + Jself(0, 1) * dMy;
@@ -514,49 +554,100 @@ void MC2d::updateField(const int i) {
 }
 
 void MC2d::stabilize() {
-    StopWatchTemperature.reset();
+    EtimeEq.clear();
+    EtimeEq.shrink_to_fit();
+    mtimeEq.clear();
+    mtimeEq.shrink_to_fit();
+    if (Prop.isLoadEquilibriumState) {
+        loadEquilibriumState();
+        calcAllFields();
+    }
     if (Prop.isClockMethod || Prop.isSCOMethod){
-        setProbClock();
+        if (Prop.isBoxes){
+            setProbClockBoxes();
+        } else {
+            setProbClock();
+        }
     } else if (Prop.isTomitaMethod){
         setProbTomita();
     }
-    for (int i = 0; i < Prop.NStabilize; i++) {
-        run1HybridStep();
-        if (Prop.isSaveEquilibrationTimeSeries && Prop.isHistogramSimulation){
+
+    calcOrderParam();
+    double E0 = getEnergy();
+    double m0 = MVectConfig.norm() / N;
+    cout << "m0 = " << m0 << endl;
+
+    StopWatchTemperature.reset();
+    for (int i = 0; i < Prop.NStabilize - 1; i++) {
+        if (Prop.isSaveEquilibrationTimeSeries){
             calcOrderParam();
             EtimeEq.push_back(getEnergy());
             mtimeEq.push_back(MVectConfig.norm());
         }
+        run1HybridStep();
+    }
+    if (Prop.isSaveEquilibrationTimeSeries){
+        calcOrderParam();
+        EtimeEq.push_back(getEnergy());
+        mtimeEq.push_back(MVectConfig.norm());
     }
 //    cout << "sigma = " << sigma << endl;
-    if (Prop.isSaveEquilibrationTimeSeries && Prop.isHistogramSimulation) {
-        #pragma omp critical (Hdf5DumpFiles)
-        {
-            if (Prop.isSaveSamplesToSepareteFolders) {
-                H5Easy::File timeSeriesHdf5Ens(FolderPath + "/EnsembleResults.h5"s,
-                                               H5Easy::File::OpenOrCreate);
-                H5Easy::dump(timeSeriesHdf5Ens, "/TimeSeries/Equilibration/Energy"s, EtimeEq,
-                             H5Easy::DumpOptions(H5Easy::Compression(9)));
-                H5Easy::dump(timeSeriesHdf5Ens, "/TimeSeries/Equilibration/Magnetization"s, mtimeEq,
-                             H5Easy::DumpOptions(H5Easy::Compression(9)));
-            } else {
+    if (Prop.isSaveEquilibrationTimeSeries) {
+        if (Prop.isHistogramSimulation){
+            #pragma omp critical (Hdf5DumpFiles)
+            {
+                if (Prop.isSaveSamplesToSepareteFolders) {
+                    H5Easy::File timeSeriesHdf5Ens(FolderPath + "/EnsembleResults.h5"s,
+                                                   H5Easy::File::OpenOrCreate);
+                    H5Easy::dump(timeSeriesHdf5Ens, "/TimeSeries/Equilibration/Energy"s, EtimeEq,
+                                 H5Easy::DumpOptions(H5Easy::Compression(9)));
+                    H5Easy::dump(timeSeriesHdf5Ens, "/TimeSeries/Equilibration/Magnetization"s, mtimeEq,
+                                 H5Easy::DumpOptions(H5Easy::Compression(9)));
+                } else {
+                    H5Easy::File timeSeriesHdf5Ens(ParentFolderPath + "/Results.h5"s,
+                                                   H5Easy::File::OpenOrCreate);
+                    H5Easy::dump(timeSeriesHdf5Ens, ("/" + to_string(InstanceIndex) + "/TimeSeries/Equilibration/Energy"s), EtimeEq,
+                                 H5Easy::DumpOptions(H5Easy::Compression(9)));
+                    H5Easy::dump(timeSeriesHdf5Ens, ("/" + to_string(InstanceIndex) + "/TimeSeries/Equilibration/Magnetization"s), mtimeEq,
+                                 H5Easy::DumpOptions(H5Easy::Compression(9)));
+                }
+            }
+        }
+        if (Prop.isFiniteDiffSimulation){
+            #pragma omp critical (Hdf5DumpFiles)
+            {
                 H5Easy::File timeSeriesHdf5Ens(ParentFolderPath + "/Results.h5"s,
                                                H5Easy::File::OpenOrCreate);
-                H5Easy::dump(timeSeriesHdf5Ens, ("/" + to_string(InstanceIndex) + "/TimeSeries/Equilibration/Energy"s), EtimeEq,
+                string dataPath = "/"s + to_string(Temperature) + "/"s + to_string(InstanceIndex);
+                H5Easy::dump(timeSeriesHdf5Ens, (dataPath + "/TimeSeries/Equilibration/Energy"s), EtimeEq,
                              H5Easy::DumpOptions(H5Easy::Compression(9)));
-                H5Easy::dump(timeSeriesHdf5Ens, ("/" + to_string(InstanceIndex) + "/TimeSeries/Equilibration/Magnetization"s), mtimeEq,
+                H5Easy::dump(timeSeriesHdf5Ens, (dataPath + "/TimeSeries/Equilibration/Magnetization"s), mtimeEq,
                              H5Easy::DumpOptions(H5Easy::Compression(9)));
+
             }
-//        H5Easy::File timeSeriesHdf5Ens(FolderPath + "/EnsembleResults.h5"s,
-//                                       H5Easy::File::OpenOrCreate);
-//        H5Easy::dump(timeSeriesHdf5Ens, "/TimeSeries/Equilibration/Energy"s, EtimeEq);
-//        H5Easy::dump(timeSeriesHdf5Ens, "/TimeSeries/Equilibration/Magnetization"s, mtimeEq);
         }
+
         EtimeEq.clear();
         EtimeEq.shrink_to_fit();
         mtimeEq.clear();
         mtimeEq.shrink_to_fit();
     }
+
+    if (Prop.isSaveEquilibriumState) {
+        #pragma omp critical (Hdf5DumpFiles)
+        {
+            string filePath = ParentFolderPath + "/.."s + "/EquilibriumState_L="s + to_string(Lat.L1) + ".h5"s;
+            H5Easy::File EQStateHdf5Ens(filePath, H5Easy::File::OpenOrCreate);
+            string dataPath = "/"s + to_string(Temperature) + "/"s + to_string(InstanceIndex);
+            H5Easy::dump(EQStateHdf5Ens, dataPath + "/EqulibriumState/Ux"s, Ux,
+                         H5Easy::DumpOptions(H5Easy::Compression(9)));
+            H5Easy::dump(EQStateHdf5Ens, dataPath + "/EqulibriumState/Uy"s, Uy,
+                         H5Easy::DumpOptions(H5Easy::Compression(9)));
+            H5Easy::dump(EQStateHdf5Ens, dataPath + "/Temperature"s, Temperature,
+                         H5Easy::DumpOptions(H5Easy::Compression(9)));
+        }
+    }
+
     if (Prop.isHistogramSimulation){
         StopWatchTemperature.printElapsedSecondsPrecise("Equilibration"s);
     }
@@ -564,8 +655,11 @@ void MC2d::stabilize() {
 
 void MC2d::stabilizeMinor() {
     if (Prop.isClockMethod || Prop.isSCOMethod){
-//        setProbClockFar();
-        setProbClock();
+        if (Prop.isBoxes){
+            setProbClockBoxes();
+        } else {
+            setProbClock();
+        }
 //        cout << "setProbClock from stabilizeMinor" <<endl;
     } else if (Prop.isTomitaMethod){
         setProbTomita();
@@ -604,7 +698,16 @@ void MC2d::getStatisticalData() {
     SumMFEvect.setZero();
     int N_MCstep = Prop.NData * Prop.dataTakingInterval;
     VectorXd mtime;
+    VectorXd Etime;
     NumResampled = 0; // for clock method
+    complexitySum = 0;
+    RNDGenerationSum = 0;
+    complexityAcceptSum = 0;
+    RNDGenerationAcceptSum = 0;
+    SelectedBondsSum.setZero();
+    AcceptedBondsSum.setZero();
+    AcceptSum = 0;
+    TotalUpdateSum = 0;
     StopWatchTemperature.reset();
 
 //    if (Prop.isHistogramMethod){
@@ -614,6 +717,7 @@ void MC2d::getStatisticalData() {
 
     if (Prop.isComputingAutoCorrelationTime) {
         mtime.setZero(Prop.NData);
+        Etime.setZero(Prop.NData);
     }
 
     if (Prop.isComputingCorrelationLength){
@@ -657,6 +761,7 @@ void MC2d::getStatisticalData() {
 
             if (Prop.isComputingAutoCorrelationTime){
                 mtime(i) = m_config;
+                Etime(i) = E_config;
             }
 
             SumE += E_config;
@@ -737,7 +842,9 @@ void MC2d::getStatisticalData() {
     double runtimeTemperature = StopWatchTemperature.elapsedSecondsPrecise();
     StopWatchTemperature.reset();
     // Correlation time
-    double tau = (Prop.isComputingAutoCorrelationTime) ? getAutoCorrelationTime(mtime) : 0;
+    double tauM =  (Prop.isComputingAutoCorrelationTime) ? getAutoCorrelationTime(mtime) : 0;
+    double tauE = (Prop.isComputingAutoCorrelationTime) ? getAutoCorrelationTime(Etime) : 0;
+    double tau = max(tauM, tauE);
     if (Prop.isComputingCorrelationLength){
         calcGVec();
 //        calcGVecOld();
@@ -756,25 +863,49 @@ void MC2d::getStatisticalData() {
 //        cout << "JrejProbCumul = " << JrejProbCumul(seq(0,min(20L, JrejProb.size()-1))) <<endl <<endl;
 //        cout << "JrejProb.sum() = " << JrejProb.sum()  <<endl;
     }
+    VectorXd SelectedBondsProbability(N);
+    VectorXd AcceptedBondsProbability(N);
+    if (Prop.isCalcSelectedBondsProbability){
+        SelectedBondsProbability = SelectedBondsSum / (N * Prop.NDataTotal  + 0.);
+        AcceptedBondsProbability = AcceptedBondsSum / (AcceptSum  + 0.);
+        #pragma omp critical (Hdf5DumpFiles)
+        {
+            H5Easy::File SelectedBonds(FolderPath + "/SelectedBondsProbability.h5"s,
+                                        H5Easy::File::OpenOrCreate);
+            H5Easy::dump(SelectedBonds, "/"s + to_string(Temperature) + "/SelectedBondsProbability"s, SelectedBondsProbability,
+                         H5Easy::DumpOptions(H5Easy::Compression(9)));
+            H5Easy::dump(SelectedBonds, "/"s + to_string(Temperature) + "/AcceptedBondsProbability"s, AcceptedBondsProbability,
+                         H5Easy::DumpOptions(H5Easy::Compression(9)));
+        }
+    }
 //    cout << "EIncreaserProb = " << UAntiAlignedWithHSum / (EIncreaserReducerTotalSum + 0.) << endl;
 //    cout << "EReducerProb = " << UAlignedWithHSum / (EIncreaserReducerTotalSum + 0.) << endl;
 //    cout << "attempt mean = " << attemptSum / (FineTuneNum + 0.0) << endl;
 //    double Binder = 1 - (MeanM4 / (3*square(MeanM2)));
 //    double phiMvect = atan2(MeanMvectPP(0), MeanMvectPP(2)); // phi = atan2(x,z)
 //    double thetaMvect = atan2(hypot(MeanMvectPP(0), MeanMvectPP(2)), MeanMvectPP(1)); // theta = atan2(hypot(x,z), y)
+    double complexity = 0;
+    double RNDperStep = 0;
+    if (Prop.isComplexityAccept){
+        complexity = complexityAcceptSum / (AcceptSum + 0.);
+        RNDperStep = RNDGenerationAcceptSum / (AcceptSum + 0.);
+    } else {
+        complexity = complexitySum / (TotalUpdateSum  + 0.);
+        RNDperStep = RNDGenerationSum / (TotalUpdateSum  + 0.);
+    }
     double ProbAccepted = (Debug_Iaccepted + 0.) / Debug_totali;
 //    double Efficiency = (Prop.NData/(2*tau)) / runtimeTemperature; // number of uncorrelated data produced in simulation runtime
-    double runtimePerMCStep = runtimeTemperature / (Prop.NData * Prop.TotalSteps); // number of uncorrelated data produced in simulation runtime
-    double t_eff = 2 * tau * runtimePerMCStep; // number of uncorrelated data produced in simulation runtime
+    double runtimePerMCStep = runtimeTemperature / (Prop.NDataTotal); // number of uncorrelated data produced in simulation runtime
+    double t_eff = tau * runtimePerMCStep; // number of uncorrelated data produced in simulation runtime
     double ProbabilityRegularAccepted     = AcceptedRegularParticleSteps     / (TotalRegularParticleSteps     + 0.);
     double ProbabilityOverrelaxedAccepted = AcceptedOverrelaxedParticleSteps / (TotalOverrelaxedParticleSteps + 0.);
     StatisticalData.row(LastTempIndex++) <<
             Temperature, hNorm, Epp, cpp, mpp , Xpp, Binder,
             mPlanepp, XPlanepp, BinderPlane,
             MeanMvectPP.norm(), MeanMvectPP(0), MeanMvectPP(1), 0,
-            mFEpp, XFEpp, BinderFE, mFEPlanepp, XFEPlanepp, BinderFEPlane, mTpp, tau,
+            mFEpp, XFEpp, BinderFE, mFEPlanepp, XFEPlanepp, BinderFEPlane, mTpp, tauM, tauE, tau,
             ProbAccepted, ProbabilityRegularAccepted, ProbabilityOverrelaxedAccepted,
-            runtimeTemperature, t_eff, runtimePerMCStep;
+            runtimeTemperature, t_eff, runtimePerMCStep, complexity, RNDperStep;
 
 }
 
@@ -850,7 +981,9 @@ void MC2d::simulateHistogram() {
 }
 
 void MC2d::simulateFiniteDiff() {
-    for (CtrlParamAbs = Prop.Pstart; (CtrlParamAbs > Prop.Pend && Temperature > 0); CtrlParamAbs -= Prop.Pdecrement) {
+//    for (CtrlParamAbs = Prop.Pstart; (CtrlParamAbs > Prop.Pend && Temperature > 0); CtrlParamAbs -= Prop.Pdecrement) {
+    for (auto Param : Prop.TemperatureList) {
+        CtrlParamAbs = Param;
         setControlParam(CtrlParamAbs);
         stabilizeAndGetStatisticalData();
     }
@@ -905,6 +1038,10 @@ void MC2d::simulateCriticalRegionEquidistant() {
 void MC2d::stabilizeAndGetStatisticalData() {
     Debug_Iaccepted = 0;
     Debug_totali = 0;
+    AcceptedRegularParticleSteps=0;
+    TotalRegularParticleSteps=0;
+    AcceptedOverrelaxedParticleSteps=0;
+    TotalOverrelaxedParticleSteps=0;
     stabilize();
     getStatisticalData();
     cout << "ControlParam = " << CtrlParamAbs << endl;
@@ -922,7 +1059,6 @@ void MC2d::calcAllFields() {
     HnewX.setZero(Hx.size());
     HnewY.setZero(Hy.size());
 //    H.setZero();
-
     if (Prop.isNeighboursMethod || Prop.isClockMethod || Prop.isSCOMethod || Prop.isTomitaMethod){
         cout << "calcAllFields NeighboursMethod" <<endl;
         for (int i = 0; i < N; ++i) {
@@ -1020,7 +1156,7 @@ void MC2d::calcAllFields() {
         }
     }
 
-    if (Prop.isHavingExchangeInteraction && !Prop.isExchangeInteractionCombinedWithJ
+    if (Prop.isHavingExchangeInteraction && !Prop.isExchangeInteractionCombinedWithDij
         && (Prop.isMacIsaacMethod || Prop.isLRONMethod)){
 //        cout << "calcAllFields Exchange" <<endl;
         for (int i = 0; i < N; ++i) {
@@ -1658,7 +1794,6 @@ void MC2d::SaveTimeSeries() {
 
 
 void MC2d::setProbClock() {
-//    cout << "setProbClock" <<endl;
     ProbClock.setZero();  //TODO rename ProbClock to ProbMax
     InVLogProbClock.setZero();
     InVOneMinusProbClock.setZero();
@@ -1666,11 +1801,10 @@ void MC2d::setProbClock() {
     double ratio = 1;
     double lambdaTot = 0;
 
-    if (Prop.isHavingExchangeInteraction){
-        ratio = Prop.DipolarStrengthToExchangeRatio;
-    }
+//    if (Prop.isHavingExchangeInteraction){
+//        ratio = Prop.DipolarStrengthToExchangeRatio;
+//    }
     lambdaVec.clear();
-//    vector<double> WalkerSamplerData;
     for (int j = 0; j < ProbClock.size(); ++j) {
         double r0j = Lat.R0jBydistance(j);
         assert(r0j > 0);        // TODO set max prob using J interactions eigenvalues
@@ -1682,27 +1816,20 @@ void MC2d::setProbClock() {
         } else {
             lambdaNew = 4*ratio*Lat.JmaxByDistance(j) /Temperature; //TODO ALERT: test more for D/J-0.1 to check its working properly
         }
-//        assert(lambdaNew < lambdaOld);
-//        assert(lambdaNew > lambdaOld/2);
         double lambda = lambdaNew;
-        lambda *= (Prop.isSCOMethod)? Prop.SCOMethodJmaxIncreaseFactor : 1;
+//        lambda *= (Prop.isSCOMethod)? Prop.SCOMethodJmaxIncreaseFactor : 1;
         ProbClock(j) = exp(- lambda);  //exp(-2*beta*2/r^3)
-        InVLogProbClock(j) = 1 / log(ProbClock(j));  //exp(-2*beta*2/r^3)
-//        InVOneMinusProbClock(j) = 1 / (1 - ProbClock(j));  //exp(-2*beta*2/r^3)
+        InVLogProbClock(j) = 1 / (- lambda);  //exp(-2*beta*2/r^3) //TODO log(exp(x)) = x
         InVOneMinusProbClock(j) = 1 / (-expm1(-lambda));  //exp(-2*beta*2/r^3)
-//        lambdaTot += lambda;
         lambdaVec.push_back(lambda);
         assert(ProbClock(j) > 0);
         dVstarVec(j) = lambda / 2;
-//        dVstarVec(j) = lambda;
     }
-//    cout << "ProbClockNN = " << ProbClock(0) << endl <<endl;
-//    cout << "ProbClock = " << ProbClock(seq(1,min(5L, ProbClock.size()-1)))  << endl <<endl;
-//    cout << "ProbClockFar.prod() = " << ProbClock(seq(Lat.Neighbours.size(), last)).prod() << endl;
-//    cout << "p(0) = " << ProbClock(0) << endl;
-    cout << "p(far0) = " << ProbClock(Lat.Neighbours.size()) << endl;
-//    cout << "lambda(0) = " << -log(ProbClock(0)) << endl;
-//    cout << "pow(p(1), Nfar) = " << pow(ProbClock(1), ProbClock.size() - 1) << endl;
+    if (InstanceIndex == 0) {
+        cout << "ProbClock = " << endl << ProbClock(seq(0, min(20L,  ProbClock.size() -1)))  << endl;
+        cout << "ProbClock.prod() = " << ProbClock.prod() << endl;
+    }
+//    cout << "p(far0) = " << ProbClock(Lat.Neighbours.size()) << endl;
 
 
 
@@ -1710,15 +1837,12 @@ void MC2d::setProbClock() {
         lambdaVec.erase(lambdaVec.begin(), lambdaVec.begin() + Lat.Neighbours.size());
     }
     WalkerSampler.set(lambdaVec);
-//    lambdaTot = std::reduce(lambdaVec.begin(), lambdaVec.end());
     lambdaTot = std::accumulate(lambdaVec.begin(), lambdaVec.end(),
                                 decltype(lambdaVec)::value_type(0));
     PoissonDis = std::poisson_distribution<int>(lambdaTot); //TODO make this work for near neighbours as well
     cout << "lambdaTot = " << lambdaTot  <<endl;
-//    cout << "Random poisson = " << PoissonDis(gen)  <<endl;
-
     int NumResampledii = 0;
-    int Nloop = 100;
+    int Nloop = 300;
     for (int i = 0; i < Nloop; ++i) {
         int jrej = (Prop.isNearGroup || Prop.isNearGroup) ? Lat.Neighbours.size() : 0;
         double nu;
@@ -1735,6 +1859,97 @@ void MC2d::setProbClock() {
         }
     }
     cout << "lambda bernoulli = " << NumResampledii/(Nloop + 0.) << endl;
+}
+
+
+
+void MC2d::setProbClockBoxes() {
+    ProbClock.setZero();  //TODO rename ProbClock to ProbMax
+    InVLogProbClock.setZero();
+    InVOneMinusProbClock.setZero();
+    double ratio = 1;
+    double lambdaTot = 0;
+
+//    if (Prop.isHavingExchangeInteraction){
+//        ratio = Prop.DipolarStrengthToExchangeRatio;
+//    }
+    VectorXi Indices;
+    Lat.getIndicesInsideBox(63);
+    if (InstanceIndex == 0) {
+        cout << "Indices = " << endl << Lat.BoxIndices(seq(0, min(20L,  Lat.BoxIndices.size() -1 )))  <<endl;
+    }
+    for (int j = 0; j < Lat.PByDistance.size(); ++j) {
+        Lat.getIndicesInsideBox(Lat.PByDistance(j));
+        ProbClock(j) = 1;
+        for (int ii = 0; ii < Lat.BoxIndices.size(); ++ii) {
+            int PinBoxidx = Lat.BoxIndices(ii);
+            double lambda = 4*ratio*Lat.Jmax1p(PinBoxidx) /Temperature;
+            double ProbClockPraticle = exp(-lambda);
+            ProbClock(j) *= ProbClockPraticle;
+        }
+        assert(ProbClock(j) > 0);
+
+//        InVLogProbClock(j) = 1 / log(ProbClock(j));  //exp(-2*beta*2/r^3)
+//        InVOneMinusProbClock(j) = 1 / (1 - ProbClock(j));  //exp(-2*beta*2/r^3)
+
+//        cout << "R0jBydistance(j) = " << endl << Lat.R0jBydistance(j) <<endl;
+//        cout << "ProbClock(j) = " << endl << ProbClock(j) <<endl;
+    }
+
+    // sorting by ProbClock
+    for (int i = 0; i < ProbClock.size(); ++i) {
+        for (int j = i; j < ProbClock.size(); ++j) {
+            if (ProbClock(j) < ProbClock(i)) {
+                swap(Lat.R0jBydistance(i), Lat.R0jBydistance(j));
+                swap(Lat.PByDistance(i),   Lat.PByDistance(j));
+                swap(Lat.XPByDistance(i),  Lat.XPByDistance(j));
+                swap(Lat.YPByDistance(i),  Lat.YPByDistance(j));
+                swap(ProbClock(i), ProbClock(j));
+            }
+        }
+    }
+
+    for (int j = 0; j < ProbClock.size(); ++j) {
+        InVLogProbClock(j) = 1 / log(ProbClock(j));  //exp(-2*beta*2/r^3)
+        InVOneMinusProbClock(j) = 1 / (1 - ProbClock(j));  //exp(-2*beta*2/r^3)
+    }
+
+    if (Prop.isMergeNearBoxes){
+        Lat.getIndicesInsideBox(0);
+        for (int ii = 0; ii < Lat.BoxIndices.size(); ++ii) {
+            int PinBoxidx = Lat.BoxIndices(ii);
+            if (PinBoxidx == 0) {
+                continue;
+            }
+            NearIndices.push_back(PinBoxidx);
+        }
+
+        int LastMergeIndex = Prop.NumberOfMerges;
+        for (int j = 0; j < LastMergeIndex ;++j) {
+            Lat.getIndicesInsideBox(Lat.PByDistance(j));
+            for (int ii = 0; ii < Lat.BoxIndices.size(); ++ii) {
+                int PinBoxidx = Lat.BoxIndices(ii);
+                if (PinBoxidx == 0) {
+                    continue;
+                }
+                NearIndices.push_back(PinBoxidx);
+            }
+        }
+        Lat.R0jBydistance   = (Lat.R0jBydistance(seq(LastMergeIndex, last))).eval();
+        Lat.PByDistance     = (Lat.PByDistance(seq(LastMergeIndex, last))).eval();
+        Lat.XPByDistance    = (Lat.XPByDistance(seq(LastMergeIndex, last))).eval();
+        Lat.YPByDistance    = (Lat.YPByDistance(seq(LastMergeIndex, last))).eval();
+        ProbClock           = (ProbClock(seq(LastMergeIndex, last))).eval();
+        InVLogProbClock     = (InVLogProbClock(seq(LastMergeIndex, last))).eval();
+        InVOneMinusProbClock= (InVOneMinusProbClock(seq(LastMergeIndex, last))).eval();
+
+    }
+
+    if (InstanceIndex == 0) {
+        cout << "ProbClock = " <<endl << ProbClock(seq(0, min(20L, ProbClock.size() -1 )))  <<endl;
+        cout << "R0jBydistance = " <<endl << Lat.R0jBydistance(seq(0, min(20L, Lat.R0jBydistance.size()-1))) <<endl;
+        cout << "ProbClock.prod() = " << ProbClock.prod() << endl;
+    }
 }
 
 
@@ -1776,7 +1991,6 @@ void MC2d::run1ClockStep() {
     if (Prop.isOverRelaxationMethod && Prop.isNearGroup) {
         isOverrelaxing = true;
         for (int j = 0; j < Prop.OverrelaxationSteps; ++j) {
-//            for (int i : ParticleListSorted) {
             for (int i = 0; i < N; ++i) {
                 overRelaxateUiNew(i);
                 run1ClockParticle(i);
@@ -1784,8 +1998,6 @@ void MC2d::run1ClockStep() {
         }
         isOverrelaxing = false;
         for (int j = 0; j < Prop.MetropolisSteps; ++j) {
-//            for (int c = 0; c < N; ++c) {
-//            int i = intDis(gen);
             for (int i = 0; i < N; ++i) {
                 randomizeUiNew();
                 run1ClockParticle(i);
@@ -1794,29 +2006,12 @@ void MC2d::run1ClockStep() {
     } else {
         isOverrelaxing = false;
         for (int j = 0; j < Prop.MetropolisSteps; ++j) {
-//            for (int c = 0; c < N; ++c) {
-//                int i = intDis(gen);
             for (int i = 0; i < N; ++i) {
                 randomizeUiNew();
-//                randomAdaptive(i);
                 run1ClockParticle(i);
             }
         }
     }
-
-//    shuffle(ParticleList.begin(), ParticleList.end(), gen);
-//    for (int i : ParticleList) {
-//        randomizeUiNew();
-//        run1ClockParticle(i);
-//    }
-
-//    double RateAccepted = AdapticeCounterAcceptance / (cmax + 0.0);
-//    double sigma_temp = sigma * (0.9/(1.0 - RateAccepted));
-//    if(sigma_temp > 500.0) {
-//        sigma_temp = 500.0;
-//    }
-//    sigma = sigma_temp;
-
 }
 
 
@@ -1897,19 +2092,10 @@ void MC2d::overRelaxateUiNew(int i, double Hxi, double Hyi){
 
 
 double MC2d::PRelOriginal(int jrej, int i, int xi, int yi, double invOneMinusPHatOld) {  // jrej is sorted by distance and is periodic
-//    cout << "PRel" <<endl;
-    assert(jrej >=0 && jrej < N-1);
-//    cout << "jrej from PRel = " << jrej << endl;
-//    int jper = Lat.PByDistance(jrej);    //jper is periodic
-//    int j = Lat.unperiodicParticle(jper, i);
-//    assert(j >=0 && j < N);
-//    assert(jper >=0 && jper < N);
-//    int jperback = Lat.periodicParticle(j, i);
-//    assert(jper == jperback);
-//    assert(almostEquals(Lat.getMinDistance(i,j), Lat.getMinDistance(0, jper)));
-//    double Phatj = ProbClock(jrej);
+    complexitySum += 1;
+    complexityLocalSum += 1;
     assert(Lat.XPByDistance(jrej) + Lat.YPByDistance(jrej) * Lat.L1 == Lat.PByDistance(jrej));
-    const int xjper = Lat.XPByDistance(jrej);
+    const int xjper = Lat.XPByDistance(jrej);  //jper is periodic
     const int yjper = Lat.YPByDistance(jrej);
     const int xj0 = xjper + xi;
     const int yj0 = yjper + yi;
@@ -1917,79 +2103,59 @@ double MC2d::PRelOriginal(int jrej, int i, int xi, int yi, double invOneMinusPHa
     const int yj = (yj0 >= Lat.L1)? yj0 - Lat.L1 : yj0;
     int j2 = yj * Lat.L1 + xj;
     int jper =  yjper * Lat.L1 + xjper;
-//    assert(j2 == j);
     const double dMx = UiNewX - Ux(i);
     const double dMy = UiNewY - Uy(i);
-//    int jper = Lat.periodicParticle(j, i);
     assert(jper >=0 && jper < N);
     double dE = 2*(dMx * (Lat.Jxx1p(jper) * Ux(j2) + Lat.Jxy1p(jper) * Uy(j2)) +
                    dMy * (Lat.Jxy1p(jper) * Ux(j2) + Lat.Jyy1p(jper) * Uy(j2)));
-//    assert(almostEquals(dE, dEij(i,j)));
-
-//    double Phatj = InvOneMinusPHatOld;
-//    double Pj = exp(-max(dEij(i,j), 0.)/Temperature);
     if (dE <= 0.){
         return 0.;
     }
 
     assert(almostEquals(InvTemperature, 1/Temperature));
-//    double Pj = exp(- dE * InvTemperature);
     double OneMinusPj = - expm1(- dE * InvTemperature);
-    assert(invOneMinusPHatOld >= OneMinusPj);
-    assert(InVLogProbClock(jrej) >= OneMinusPj);
+    assert(1 - ProbClock(jrej) >= OneMinusPj);
 
     double prel = OneMinusPj * invOneMinusPHatOld;
-//    double prel = (Pj - Phatj) / (1 - Phatj);
-//    cout << "prel = " <<prel << endl;
     return prel;
 }
 
 void MC2d::run1ClockParticleOriginal(int i) {
-//    cout << "run1ClockParticle" <<endl;
+    if (Prop.isCalcSelectedBondsProbability){
+        SelectedBondsLocal.setZero();
+    }
     int jrej = 0;     //jrej is sorted by distance and is periodic
     Debug_totali++;
+    complexityLocalSum = 0;
+    RNDGenerationLocalSum = 0;
     TotalRegularParticleSteps     += (!isOverrelaxing)? 1 : 0;
     TotalOverrelaxedParticleSteps += ( isOverrelaxing)? 1 : 0;
     if (Prop.isNearGroup){
-//        cout << "here" << endl;
-//        cout << "dErot(i) = " << dErot(i) <<endl;
-//        cout << "dENN(i) = " << dENN(i) <<endl;
         assert(almostEquals(dErot(i),dENN(i)));
          double dE = dErot(i);
-//         if (dE > 0 && realDis(gen) > exp(-dE * InvTemperature)){
+        RNDGenerationSum += 1;
+        RNDGenerationLocalSum += 1;
          if (!isOverrelaxing && realDis(gen) > exp(-dE * InvTemperature)){
              return;   // reject move
          }
          jrej = Lat.Neighbours.size();
     }
-//    const int i = intDis(gen); //sorted by Index
-//    const int i = Random(N); //sorted by Index
-//    const int xi = i % Lat.L1;
-//    const int yi = i / Lat.L1;
     const int xi = Lat.XPbyIndex(i);
     const int yi = Lat.YPbyIndex(i);
     assert(xi == i % Lat.L1);
     assert(yi == i / Lat.L1);
-//    randomizeUiNew();
-//    randomAdaptive(i);
-//    cout << "concensusProb(i) = " << concensusProb(i) << endl;
+    RNDGenerationLocalSum += 1;
+    RNDGenerationSum += 1;
     double nu = realDis(gen);
-//    double nu = Random();
     double invOneMinusPHatOld = InVOneMinusProbClock(jrej);
     assert(int(floor(log(nu)/log(ProbClock(jrej)))) == int(log(nu)/log(ProbClock(jrej))));
-//    jrej = jrej + floor(log(nu)/log(ProbClock(jrej)));
     assert(almostEquals(InVLogProbClock(jrej), 1 / log(ProbClock(jrej))));
     const int IntMax = std::numeric_limits<int>::max();
     double jrejTemp = jrej + (log(nu) * InVLogProbClock(jrej));
     jrej = (jrejTemp<= IntMax)? jrejTemp : IntMax;
     while(true){
-//        jrej = jrej + (1 + log(nu)/log(ProbClock(jrej)));
-//        cout << "jrej = " <<  jrej <<endl;
-//        assert((jrej >= 0 && jrej < N-2));
-//        assert(ProbOld <= ProbClock(jrej));
         assert(Lat.PByDistance.size() - 1 == N - 2);
         if (jrej > Lat.PByDistance.size() - 1){ // there is totally N-1 bouds indexed from 0. so the index of the last bond is N-2
-//        if (jrej > N - 2){ // there is totally N-1 bouds indexed from 0. so the index of the last bond is N-2
             Debug_Iaccepted++;    // move accepted
             AcceptedRegularParticleSteps     += (!isOverrelaxing)? 1 : 0;
             AcceptedOverrelaxedParticleSteps += ( isOverrelaxing)? 1 : 0;
@@ -1997,27 +2163,200 @@ void MC2d::run1ClockParticleOriginal(int i) {
                 updateField(i);
             }
             updateState(i);
-//            AdapticeCounterAcceptance++;
-//            cout << "i = " << i << " accepted" <<endl;
+            if (Prop.isCalcSelectedBondsProbability){
+                SelectedBondsSum += SelectedBondsLocal;
+                AcceptedBondsSum += SelectedBondsLocal;
+            }
+            AcceptSum++;
+            complexityAcceptSum += complexityLocalSum;
+            RNDGenerationAcceptSum += RNDGenerationLocalSum;
             break;
         } else  {
+            if (Prop.isCalcSelectedBondsProbability){
+                SelectedBondsLocal(jrej)++;
+            }
             double prel = PRelOriginal(jrej, i, xi, yi, invOneMinusPHatOld);
+            RNDGenerationLocalSum += 1;
+            RNDGenerationSum += 1;
             if (prel > 0. && realDis(gen) <= prel){
-                //            cout << "i = " << i << " rejected" <<endl;
                 JrejSum(jrej)++;
+                if (Prop.isCalcSelectedBondsProbability){
+                    SelectedBondsSum += SelectedBondsLocal;
+                }
+                break;   // move rejected
+            }
+        }
+        NumResampled++;
+        assert(jrej >=0 && jrej < N-1);
+        RNDGenerationLocalSum += 1;
+        RNDGenerationSum += 1;
+        nu = realDis(gen);
+        invOneMinusPHatOld = InVOneMinusProbClock(jrej);
+        assert(almostEquals(InVLogProbClock(jrej), 1 / log(ProbClock(jrej))));
+        assert(int(floor(log(nu)/log(ProbClock(jrej)))) == int(log(nu)/log(ProbClock(jrej))));
+        jrejTemp = jrej + (1 + log(nu) * InVLogProbClock(jrej));
+        jrej = (jrejTemp<= IntMax)? jrejTemp : IntMax;
+    }
+}
+
+
+double MC2d::PRelBoxes(int jrej, int i, int xi, int yi, double invOneMinusPHatOld) {  // jrej is sorted by distance and is periodic
+    assert(Lat.XPByDistance(jrej) + Lat.YPByDistance(jrej) * Lat.L1 == Lat.PByDistance(jrej));
+    const int jperBox = Lat.PByDistance(jrej);  //jper is periodic
+    assert(jperBox >=0 && jperBox < N);
+    Lat.getIndicesInsideBox(jperBox);
+    double dELocal = 0;
+    for (int ii = 0; ii < Lat.BoxIndices.size(); ++ii) {
+        complexitySum += 1;
+        int PinBoxidx = Lat.BoxIndices(ii);
+        if (PinBoxidx == 0) { // TODO this is an assertion
+            cout << "jperBox = " << jperBox <<endl;
+            rassert(false);
+        }
+        const int xjper = PinBoxidx % Lat.L1;  //jper is periodic
+        const int yjper = PinBoxidx / Lat.L1;
+        const int xj0 = xjper + xi;
+        const int yj0 = yjper + yi;
+        const int xj = (xj0 >= Lat.L1)? xj0 - Lat.L1 : xj0;
+        const int yj = (yj0 >= Lat.L1)? yj0 - Lat.L1 : yj0;
+        int j2 = yj * Lat.L1 + xj;
+//        int jper =  yjper * Lat.L1 + xjper;
+        assert(PinBoxidx ==  yjper * Lat.L1 + xjper);
+        int jper =  PinBoxidx;
+        const double dMx = UiNewX - Ux(i);
+        const double dMy = UiNewY - Uy(i);
+        assert(jper >=0 && jper < N);
+        dELocal  += 2*(dMx * (Lat.Jxx1p(jper) * Ux(j2) + Lat.Jxy1p(jper) * Uy(j2)) +
+                       dMy * (Lat.Jxy1p(jper) * Ux(j2) + Lat.Jyy1p(jper) * Uy(j2)));
+    }
+
+    double dE = dELocal;
+    if (dE <= 0.){
+        return 0.;
+    }
+
+    assert(almostEquals(InvTemperature, 1/Temperature));
+    double OneMinusPj = - expm1(- dE * InvTemperature);
+    assert(1 - ProbClock(jrej) >= OneMinusPj);
+//    assert(InVLogProbClock(jrej) >= OneMinusPj);
+
+    double prel = OneMinusPj * invOneMinusPHatOld;
+    return prel;
+}
+
+void MC2d::run1ClockParticleBoxes(int i) {
+    if (Prop.isCalcSelectedBondsProbability){
+        SelectedBondsLocal.setZero();
+    }
+    int jrej = 0;     //jrej is sorted by distance and is periodic
+    Debug_totali++;
+    TotalRegularParticleSteps     += (!isOverrelaxing)? 1 : 0;
+    TotalOverrelaxedParticleSteps += ( isOverrelaxing)? 1 : 0;
+//    if (Prop.isNearGroup){
+//        assert(almostEquals(dErot(i),dENN(i)));
+//        double dE = dErot(i);
+//        RNDGenerationSum += 1;
+//        if (!isOverrelaxing && realDis(gen) > exp(-dE * InvTemperature)){
+//            return;   // reject move
+//        }
+//        jrej = Lat.Neighbours.size();
+//    }
+    const int xi = Lat.XPbyIndex(i);
+    const int yi = Lat.YPbyIndex(i);
+    assert(xi == i % Lat.L1);
+    assert(yi == i / Lat.L1);
+
+    double dELocal = 0;
+
+    if (Prop.isMergeNearBoxes){
+        for (int PinBoxidx : NearIndices) {
+            complexitySum += 1;
+            const int xjper = PinBoxidx % Lat.L1;  //jper is periodic
+            const int yjper = PinBoxidx / Lat.L1;
+            const int xj0 = xjper + xi;
+            const int yj0 = yjper + yi;
+            const int xj = (xj0 >= Lat.L1)? xj0 - Lat.L1 : xj0;
+            const int yj = (yj0 >= Lat.L1)? yj0 - Lat.L1 : yj0;
+            int j2 = yj * Lat.L1 + xj;
+            int jper =  yjper * Lat.L1 + xjper;
+            const double dMx = UiNewX - Ux(i);
+            const double dMy = UiNewY - Uy(i);
+            assert(jper >=0 && jper < N);
+            dELocal  += 2*(dMx * (Lat.Jxx1p(jper) * Ux(j2) + Lat.Jxy1p(jper) * Uy(j2)) +
+                           dMy * (Lat.Jxy1p(jper) * Ux(j2) + Lat.Jyy1p(jper) * Uy(j2)));
+        }
+    } else {
+        Lat.getIndicesInsideBox(0);
+        for (int ii = 0; ii < Lat.BoxIndices.size(); ++ii) {
+            int PinBoxidx = Lat.BoxIndices(ii);
+            if (PinBoxidx == 0) {
+                continue;
+            }
+            const int xjper = PinBoxidx % Lat.L1;  //jper is periodic
+            const int yjper = PinBoxidx / Lat.L1;
+            const int xj0 = xjper + xi;
+            const int yj0 = yjper + yi;
+            const int xj = (xj0 >= Lat.L1)? xj0 - Lat.L1 : xj0;
+            const int yj = (yj0 >= Lat.L1)? yj0 - Lat.L1 : yj0;
+            int j2 = yj * Lat.L1 + xj;
+            int jper =  yjper * Lat.L1 + xjper;
+            const double dMx = UiNewX - Ux(i);
+            const double dMy = UiNewY - Uy(i);
+            assert(jper >=0 && jper < N);
+            dELocal  += 2*(dMx * (Lat.Jxx1p(jper) * Ux(j2) + Lat.Jxy1p(jper) * Uy(j2)) +
+                           dMy * (Lat.Jxy1p(jper) * Ux(j2) + Lat.Jyy1p(jper) * Uy(j2)));
+        }
+    }
+    if (realDis(gen) > exp(-dELocal * InvTemperature)){
+            return;   // reject move
+    }
+
+
+    double nu = realDis(gen);
+    RNDGenerationSum += 1;
+    double invOneMinusPHatOld = InVOneMinusProbClock(jrej);
+    assert(int(floor(log(nu)/log(ProbClock(jrej)))) == int(log(nu)/log(ProbClock(jrej))));
+    assert(almostEquals(InVLogProbClock(jrej), 1 / log(ProbClock(jrej))));
+    const int IntMax = std::numeric_limits<int>::max();
+    double jrejTemp = jrej + (log(nu) * InVLogProbClock(jrej));
+    jrej = (jrejTemp<= IntMax)? jrejTemp : IntMax;
+    while(true){
+//        assert(Lat.PByDistance.size() - 1 == N - 2);
+        if (jrej > Lat.PByDistance.size() - 1){ // there is totally N-1 bouds indexed from 0. so the index of the last bond is N-2
+            Debug_Iaccepted++;    // move accepted
+            AcceptedRegularParticleSteps     += (!isOverrelaxing)? 1 : 0;
+            AcceptedOverrelaxedParticleSteps += ( isOverrelaxing)? 1 : 0;
+            if (Prop.isNearGroup){
+                updateField(i);
+            }
+            updateState(i);
+            if (Prop.isCalcSelectedBondsProbability){
+                SelectedBondsSum += SelectedBondsLocal;
+                AcceptedBondsSum += SelectedBondsLocal;
+                AcceptSum++;
+            }
+            break;
+        } else  {
+            if (Prop.isCalcSelectedBondsProbability){
+                SelectedBondsLocal(jrej)++;
+            }
+            double prel = PRelBoxes(jrej, i, xi, yi, invOneMinusPHatOld);
+            RNDGenerationSum += 1;
+            if (prel > 0. && realDis(gen) <= prel){
+                JrejSum(jrej)++;
+                if (Prop.isCalcSelectedBondsProbability){
+                    SelectedBondsSum += SelectedBondsLocal;
+                }
                 break;   // move rejected
             }
         }
         NumResampled++;
         assert(jrej >=0 && jrej < N-1);
         nu = realDis(gen);
-//        nu = Random();
-//        ProbOld = ProbClock(jrej);
+        RNDGenerationSum += 1;
         invOneMinusPHatOld = InVOneMinusProbClock(jrej);
-//        assert(almostEquals(InVOneMinusProbClock(jrej), 1/(1 - ProbOld)));
         assert(almostEquals(InVLogProbClock(jrej), 1 / log(ProbClock(jrej))));
         assert(int(floor(log(nu)/log(ProbClock(jrej)))) == int(log(nu)/log(ProbClock(jrej))));
-//        jrej = jrej + floor(1 + log(nu) * InVLogProbClock(jrej));
         jrejTemp = jrej + (1 + log(nu) * InVLogProbClock(jrej));
         jrej = (jrejTemp<= IntMax)? jrejTemp : IntMax;
     }
@@ -2045,11 +2384,15 @@ void MC2d::run1ClockParticleWalker(int i) {
     Debug_totali++;
     TotalRegularParticleSteps        += (!isOverrelaxing)? 1 : 0;
     TotalOverrelaxedParticleSteps    += ( isOverrelaxing)? 1 : 0;
+    complexityLocalSum = 0;
+    RNDGenerationLocalSum = 0;
     if (Prop.isNearGroup){
 //        cout << "here" << endl;
         assert(almostEquals(dErot(i),dENN(i)));
         double dE = dErot(i);
 //         if (dE > 0 && realDis(gen) > exp(-dE * InvTemperature)){
+        RNDGenerationLocalSum += 1;
+        RNDGenerationSum += 1;
         if (!isOverrelaxing && realDis(gen) > exp(-dE * InvTemperature)){
             return;   // reject move
         }
@@ -2065,12 +2408,17 @@ void MC2d::run1ClockParticleWalker(int i) {
     assert(yi == i / Lat.L1);
 
     vector<int> jrejVecSmall;
+    RNDGenerationLocalSum += 1;
+    RNDGenerationSum += 1;
     double RandomPoisson = PoissonDis(gen);
     for (int j = 0; j < RandomPoisson; ++j) {
+        RNDGenerationLocalSum += 1;
+        RNDGenerationSum += 1;
         jrej = WalkerSampler(gen) + shift;
 //        while (jrejVecBool[jrej]){
 //            jrej = WalkerSampler(gen) + shift;
 //        }
+
         if (jrejVecBool[jrej]){
             continue;
         }
@@ -2081,6 +2429,8 @@ void MC2d::run1ClockParticleWalker(int i) {
         double invOneMinusPhat = InVOneMinusProbClock(jrej);
 
         double prel = PRelOriginal(jrej, i, xi, yi, invOneMinusPhat);
+        RNDGenerationLocalSum += 1;
+        RNDGenerationSum += 1;
         if (prel > 0. && realDis(gen) <= prel){
 //            cout << "i = " << i << " rejected" <<endl;
 //            cout << "jrej = " << jrej  <<endl;
@@ -2095,6 +2445,9 @@ void MC2d::run1ClockParticleWalker(int i) {
     Debug_Iaccepted++;    // move accepted
     AcceptedRegularParticleSteps     += (!isOverrelaxing)? 1 : 0;
     AcceptedOverrelaxedParticleSteps += ( isOverrelaxing)? 1 : 0;
+    AcceptSum++;
+    complexityAcceptSum += complexityLocalSum;
+    RNDGenerationAcceptSum += RNDGenerationLocalSum;
     if (Prop.isNearGroup){
         updateField(i);
     }
@@ -2103,7 +2456,10 @@ void MC2d::run1ClockParticleWalker(int i) {
 }
 
 void MC2d::run1ClockParticle(int i){
-    if(Prop.isWalkerAliasMethod){
+    TotalUpdateSum++;
+    if (Prop.isBoxes){
+        run1ClockParticleBoxes(i);
+    } else if(Prop.isWalkerAliasMethod){
         run1ClockParticleWalker(i);
     } else {
         run1ClockParticleOriginal(i);
@@ -2213,6 +2569,7 @@ void MC2d::validiatePjSCONew(int jrej, double invOneMinusPHatOld, SCOData& scoDa
 //    assert(jper == jperback);
 //    assert(almostEquals(Lat.getMinDistance(i,j), Lat.getMinDistance(0, jper)));
 //    double Phatj = ProbClock(jrej);
+    complexitySum += 1;
     assert(Lat.XPByDistance(jrej) + Lat.YPByDistance(jrej) * Lat.L1 == Lat.PByDistance(jrej));
     const int xjper = Lat.XPByDistance(jrej);
     const int yjper = Lat.YPByDistance(jrej);
@@ -2243,10 +2600,17 @@ void MC2d::validiatePjSCONew(int jrej, double invOneMinusPHatOld, SCOData& scoDa
 //    double OneMinusPj = 1 - (exp(Eij * InvTemperature) *  exp(- dVStar));   // - expm1 = 1 - e^x
     OneMinusPj = (OneMinusPj < 0.)? 0. : OneMinusPj;
 //    double Pj = exp(Eij * InvTemperature - dVStar);
-    assert(invOneMinusPHatOld >= OneMinusPj);
+    if (1 - ProbClock(jrej) <= OneMinusPj){
+        cout << "1 - ProbClock(jrej) = " << 1 - ProbClock(jrej)<<  endl;
+        cout << "OneMinusPj = " << OneMinusPj << endl;
+        cout << "jrej = " << jrej << endl;
+    }
+    assert(1 - ProbClock(jrej) >= OneMinusPj);
+//    assert(invOneMinusPHatOld >= OneMinusPj);
     assert(OneMinusPj >= 0. && OneMinusPj <= 1.);
     assert(almostEquals(exp(Eij * InvTemperature - dVStar),  PjSCO(jrej, i, scoData.xi, scoData.yi)));
     double prel = OneMinusPj * invOneMinusPHatOld;
+    RNDGenerationSum += 1;
     if (realDis(gen) <= prel) {
         double EijNew = 2*(UiNewX * Hxij + UiNewY * Hyij);
 //        double EijNew2 = 2*(UiNewX * (Lat.Jxx1p(jper) * Ux(j2) + Lat.Jxy1p(jper) * Uy(j2)) +
@@ -2295,7 +2659,10 @@ double MC2d::dESCONew(SCOData& scoData){
 }
 
 void MC2d::run1SCOParticleOriginal(int i) {
-//    cout << "run1ClockParticle" <<endl;
+//    cout << "run1SCOParticleOriginal" <<endl;
+    if (Prop.isCalcSelectedBondsProbability){
+        SelectedBondsLocal.setZero();
+    }
     int jrej = 0;     //jrej is sorted by distance and is periodic
     Debug_totali++;
     TotalRegularParticleSteps     += (!isOverrelaxing)? 1 : 0;
@@ -2307,6 +2674,7 @@ void MC2d::run1SCOParticleOriginal(int i) {
             double dE = dErot(i);
             //        cout << "here " << endl;
             //         if (dE > 0 && realDis(gen) > exp(-dE * InvTemperature)){
+            RNDGenerationSum += 1;
             if (!isOverrelaxing && realDis(gen) > exp(-dE * InvTemperature)){
                 return;   // reject move
             }
@@ -2332,6 +2700,7 @@ void MC2d::run1SCOParticleOriginal(int i) {
     vector<int> jrejVec;
     vector<double> PjVec;
     double nu = realDis(gen);
+    RNDGenerationSum += 1;
 //    double nu = Random();
     double invOneMinusPHatOld = InVOneMinusProbClock(jrej);
     assert(int(floor(log(nu)/log(ProbClock(jrej)))) == int(log(nu)/log(ProbClock(jrej))));
@@ -2353,10 +2722,14 @@ void MC2d::run1SCOParticleOriginal(int i) {
 //            cout << "i = " << i << " accepted" <<endl;
             break;
         } else  {
+            if (Prop.isCalcSelectedBondsProbability){
+                SelectedBondsLocal(jrej)++;
+            }
 //            double Pj = PjSCO(jrej, i, xi, yi);
 //            assert(invOneMinusPHatOld >= (1 - Pj));
 //            assert(Pj >=0 && Pj <=1);
 //            double prel = (1 - Pj) * invOneMinusPHatOld;
+
             validiatePjSCONew(jrej, invOneMinusPHatOld, scoData);
 //            if (realDis(gen) <= prel){
 //                jrejVec.push_back(jrej);
@@ -2367,6 +2740,7 @@ void MC2d::run1SCOParticleOriginal(int i) {
         NumResampled++;
         assert(jrej >=0 && jrej < N-1);
         nu = realDis(gen);
+        RNDGenerationSum += 1;
 //        nu = Random();
 //        ProbOld = ProbClock(jrej);
         invOneMinusPHatOld = InVOneMinusProbClock(jrej);
@@ -2384,12 +2758,22 @@ void MC2d::run1SCOParticleOriginal(int i) {
 //    double dE = dESCO(jrejVec, i, xi, yi, PjVec);
     double dE = dESCONew(scoData);
 //    assert(almostEquals(dE, dE2));
+    RNDGenerationSum += 1;
+    if (Prop.isCalcSelectedBondsProbability){
+        SelectedBondsSum += SelectedBondsLocal;
+    }
     if (dE < 0 || (realDis(gen) < exp(-dE * InvTemperature))){
         AcceptedRegularParticleSteps     += (!isOverrelaxing)? 1 : 0;
         AcceptedOverrelaxedParticleSteps += ( isOverrelaxing)? 1 : 0;
         Debug_Iaccepted++;    // move accepted
-        updateField(i);
+        AcceptSum++;
+        if (Prop.isNearGroup){
+            updateField(i);
+        };
         updateState(i);
+        if (Prop.isCalcSelectedBondsProbability){
+            AcceptedBondsSum += SelectedBondsLocal;
+        }
 //        cout << "i = " << i << " accepted" <<endl;
 //        JrejSum(jrej)++;
     }
@@ -2402,10 +2786,13 @@ void MC2d::run1SCOParticleWalker(int i) {
     Debug_totali++;
     TotalRegularParticleSteps     += (!isOverrelaxing)? 1 : 0;
     TotalOverrelaxedParticleSteps += ( isOverrelaxing)? 1 : 0;
+    complexityLocalSum = 0;
+    RNDGenerationLocalSum = 0;
     if (Prop.isNearGroup){
         if (!Prop.isSCOMethodNearGroupBuiltIn){
             assert(almostEquals(dErot(i),dENN(i)));
             double dE = dErot(i);
+            RNDGenerationSum += 1;
             if (!isOverrelaxing && realDis(gen) > exp(-dE * InvTemperature)){
                 return;   // reject move
             }
@@ -2427,8 +2814,10 @@ void MC2d::run1SCOParticleWalker(int i) {
 
     vector<int> jrejVecSmall;
     double RandomPoisson = PoissonDis(gen);
+    RNDGenerationSum += 1;
     for (int j = 0; j < RandomPoisson; ++j) {
         jrej = WalkerSampler(gen) + shift;
+        RNDGenerationSum += 1;
         if (jrejVecBool[jrej]){
             continue;
         }
@@ -2441,6 +2830,7 @@ void MC2d::run1SCOParticleWalker(int i) {
     }
 
     double dE = dESCONew(scoData);
+    RNDGenerationSum += 1;
     if (dE < 0 || (realDis(gen) < exp(-dE * InvTemperature))){
         AcceptedRegularParticleSteps     += (!isOverrelaxing)? 1 : 0;
         AcceptedOverrelaxedParticleSteps += ( isOverrelaxing)? 1 : 0;
@@ -2452,89 +2842,11 @@ void MC2d::run1SCOParticleWalker(int i) {
 }
 
 void MC2d::run1SCOParticle(int i){
+    TotalUpdateSum++;
     if(Prop.isWalkerAliasMethod){
         run1SCOParticleWalker(i);
     } else {
         run1SCOParticleOriginal(i);
-    }
-}
-
-void MC2d::run1SCOParticleOverrelaxation(int i) {
-//    cout << "run1ClockParticle" <<endl;
-    int jrej = 0;     //jrej is sorted by distance and is periodic
-    Debug_totali++;
-//    const int i = intDis(gen); //sorted by Index
-//    const int i = Random(N); //sorted by Index
-//    const int xi = i % Lat.L1;
-//    const int yi = i / Lat.L1;
-    const int xi = Lat.XPbyIndex(i);
-    const int yi = Lat.YPbyIndex(i);
-    SCOData scoData(i, xi, yi);
-//    scoData.i = i;
-//    scoData.xi = xi;
-//    scoData.yi = yi;
-    assert(xi == i % Lat.L1);
-    assert(yi == i / Lat.L1);
-//    randomizeUiNew();
-//    randomAdaptive(i);
-//    cout << "concensusProb(i) = " << concensusProb(i) << endl;
-    vector<int> jrejVec;
-    vector<double> PjVec;
-    double nu = realDis(gen);
-//    double nu = Random();
-    double invOneMinusPHatOld = InVOneMinusProbClock(jrej);
-    assert(int(floor(log(nu)/log(ProbClock(jrej)))) == int(log(nu)/log(ProbClock(jrej))));
-//    jrej = jrej + floor(log(nu)/log(ProbClock(jrej)));
-    assert(almostEquals(InVLogProbClock(jrej), 1 / log(ProbClock(jrej))));
-    jrej = jrej + (log(nu) * InVLogProbClock(jrej));
-
-    while(true){
-//        jrej = jrej + (1 + log(nu)/log(ProbClock(jrej)));
-//        cout << "jrej = " <<  jrej <<endl;
-//        assert((jrej >= 0 && jrej < N-2));
-//        assert(ProbOld <= ProbClock(jrej));
-        if (jrej > Lat.PByDistance.size() - 1){ // there is totally N-1 bouds indexed from 0. so the index of the last bond is N-2
-//            Debug_Iaccepted++;    // move accepted
-//            updateState(i);
-//            AdapticeCounterAcceptance++;
-//            cout << "i = " << i << " accepted" <<endl;
-            break;
-        } else  {
-//            double Pj = PjSCO(jrej, i, xi, yi);
-//            assert(invOneMinusPHatOld >= (1 - Pj));
-//            assert(Pj >=0 && Pj <=1);
-//            double prel = (1 - Pj) * invOneMinusPHatOld;
-            validiatePjSCONew(jrej, invOneMinusPHatOld, scoData);
-//            if (realDis(gen) <= prel){
-//                jrejVec.push_back(jrej);
-//                PjVec.push_back(Pj);
-//            }
-        }
-
-        NumResampled++;
-        assert(jrej >=0 && jrej < N-1);
-        nu = realDis(gen);
-//        nu = Random();
-//        ProbOld = ProbClock(jrej);
-        invOneMinusPHatOld = InVOneMinusProbClock(jrej);
-//        assert(almostEquals(InVOneMinusProbClock(jrej), 1/(1 - ProbOld)));
-        assert(almostEquals(InVLogProbClock(jrej), 1 / log(ProbClock(jrej))));
-        assert(int(floor(log(nu)/log(ProbClock(jrej)))) == int(log(nu)/log(ProbClock(jrej))));
-//        jrej = jrej + floor(1 + log(nu) * InVLogProbClock(jrej));
-        jrej = jrej + (1 + log(nu) * InVLogProbClock(jrej));
-    }
-
-//    cout << "jrejVec = " <<endl;
-//    for_each(jrejVec.begin(), jrejVec.end(), [](const auto& elem) { cout << elem << " "; });
-//    cout << endl;
-//    double dE = dESCO(jrejVec, i, xi, yi, PjVec);
-    double dE = dESCONew(scoData);
-//    assert(almostEquals(dE, dE2));
-    if (dE < 0 || (realDis(gen) < exp(-dE * InvTemperature))){
-        Debug_Iaccepted++;    // move accepted
-        updateState(i);
-//        cout << "i = " << i << " accepted" <<endl;
-//        JrejSum(jrej)++;
     }
 }
 
@@ -2556,18 +2868,22 @@ void MC2d::run1SCOStep() {
     if (Prop.isOverRelaxationMethod) {
         if (Prop.isSCOMethodOverrelaxationBuiltIn && !Prop.isNearGroup){
             isOverrelaxing = true;
-            for (int j = 0; j < (Prop.OverrelaxationSteps + Prop.MetropolisSteps); ++j) {
-//                for (int c = 0; c < N; ++c) {
-//                    int i = intDis(gen);
-                 for (int i = 0; i < N; ++i) {
+            for (int j = 0; j < Prop.OverrelaxationSteps; ++j) {
+                for (int i = 0; i < N; ++i) {
                     randomizeUiNew();
-                    run1SCOParticleOverrelaxation(i);
+                    run1SCOParticle(i);
+                }
+            }
+            isOverrelaxing = false;
+            for (int j = 0; j < Prop.MetropolisSteps; ++j) {
+                for (int i = 0; i < N; ++i) {
+                    randomizeUiNew();
+                    run1SCOParticle(i);
                 }
             }
         } else if (Prop.isNearGroup) {
             isOverrelaxing = true;
             for (int j = 0; j < Prop.OverrelaxationSteps; ++j) {
-//            for (int i : ParticleListSorted) {
                 for (int i = 0; i < N; ++i) {
                     overRelaxateUiNew(i);
                     run1SCOParticle(i);
@@ -2575,9 +2891,7 @@ void MC2d::run1SCOStep() {
             }
             isOverrelaxing = false;
             for (int j = 0; j < Prop.MetropolisSteps; ++j) {
-//                for (int c = 0; c < N; ++c) {
-//                    int i = intDis(gen);
-            for (int i = 0; i < N; ++i) {
+                for (int i = 0; i < N; ++i) {
                     randomizeUiNew();
                     run1SCOParticle(i);
                 }
@@ -2586,27 +2900,12 @@ void MC2d::run1SCOStep() {
     } else {
         isOverrelaxing = false;
         for (int j = 0; j < Prop.MetropolisSteps; ++j) {
-//            for (int c = 0; c < N; ++c) {
-//                int i = intDis(gen);
             for (int i = 0; i < N; ++i) {
                 randomizeUiNew();
                 run1SCOParticle(i);
             }
         }
     }
-
-//    shuffle(ParticleList.begin(), ParticleList.end(), gen);
-//    for (int i : ParticleList) {
-//        randomizeUiNew();
-//        run1ClockParticle(i);
-//    }
-
-//    double RateAccepted = AdapticeCounterAcceptance / (cmax + 0.0);
-//    double sigma_temp = sigma * (0.9/(1.0 - RateAccepted));
-//    if(sigma_temp > 500.0) {
-//        sigma_temp = 500.0;
-//    }
-//    sigma = sigma_temp;
 
 }
 

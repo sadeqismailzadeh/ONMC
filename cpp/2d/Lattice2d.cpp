@@ -95,20 +95,22 @@ Lattice2d& Lattice2d::setSupercell() {
         setJmax1p();
         calcDistanceVec1p();
         setPAndRijAndJmaxByDistance();
-        if (Prop.isNearGroupByMaxEnergyProportion){
-            calcNeighboursbyNearGroupEnergyProportion(Prop.NearGroupMaxEnergyProportion);
-        } else {
-            calcNeighbours(Prop.NthNeighbour);
+        if (Prop.isNearGroup) {
+            if (Prop.isNearGroupByMaxEnergyProportion){
+                calcNeighboursbyNearGroupEnergyProportion(Prop.NearGroupMaxEnergyProportion);
+            } else if (Prop.isNearGroupByDistance) {
+                calcNeighboursbyDistannce(Prop.NearGroupDistance);
+            } else {
+                calcNeighbours(Prop.NthNeighbour);
+            }
+            setPAndRijByDistanceFar();
+        } else  if (Prop.isBoxes){
+            setBoxes();
         }
-        setPAndRijByDistanceFar();
 //        computeInteractionTensorEwald1p();
 //        setJNeighborsEwald();
 //        computeInteractionTensorEwald();
 
-    }
-    if (Prop.isHavingExchangeInteraction){
-        calcDistanceVec1p();
-        calcNearestNeighbours();
     }
 
     if (Prop.isNeighboursMethod) {
@@ -522,11 +524,6 @@ Lattice2d& Lattice2d::computeInteractionTensorEwald1p() {
 
     }
 
-    if (Prop.isHavingExchangeInteraction){
-        calcDistanceVec1p();
-        decreaseDipolarStrength();
-    }
-
     if (Prop.isNoSelfEnergy){
         Jxx1p(0) = 0;
         Jxy1p(0) = 0;
@@ -534,6 +531,14 @@ Lattice2d& Lattice2d::computeInteractionTensorEwald1p() {
         Jyy1p(0) = 0;
         Jzz1p(0) = 0;
     }
+
+    if (Prop.isHavingExchangeInteraction){
+        calcDistanceVec1p();
+        calcNearestNeighbours();
+        decreaseDipolarStrength();
+    }
+
+
     Jself(0,0) = Jxx1p(0);
     Jself(0,1) = Jxy1p(0);
     Jself(1,0) = Jxy1p(0);
@@ -1330,6 +1335,7 @@ void Lattice2d::calcNeighbours(int n) {
 //    Neighbours = Map<VectorXd> (NeighboursVector.data(), NeighboursVector.size());
     std::sort(Neighbours.begin(), Neighbours.end());   // it's sorted by the way but just  in case....
     cout << "DistanceVec1p(n) = "<< endl << DistanceVec1p(n)<< endl;
+    DistanceVec1p_n = DistanceVec1p(n);
 //    cout << "Neighbours = "<< endl << Neighbours<< endl;
     cout << "Neighbours.size() = "<< endl << Neighbours.size()<< endl;
 //    cout << "Neighbours = "<< endl << Neighbours<< endl;
@@ -1519,6 +1525,11 @@ void Lattice2d::setPAndRijAndJmaxByDistance() {
         }
     }
 
+    cout << "PByDistance = " << endl << PByDistance(seq(0, min(10L, PByDistance.size()-1)))  << endl;
+    cout << "XPByDistance = " << endl << XPByDistance(seq(0, min(10L, XPByDistance.size()-1)))  << endl;
+    cout << "YPByDistance = " << endl << YPByDistance(seq(0, min(10L, YPByDistance.size())-1))  << endl;
+    cout << "R0jBydistance = " << endl << R0jBydistance(seq(0, min(10L, R0jBydistance.size()-1)))  << endl;
+    cout << "JmaxByDistance = " << endl << JmaxByDistance(seq(0, min(10L, JmaxByDistance.size()-1)))  << endl;
 
 }
 
@@ -1569,31 +1580,22 @@ void Lattice2d::setXYPByIndex() {
 void Lattice2d::decreaseDipolarStrength() {
     double ratio = Prop.DipolarStrengthToExchangeRatio;
     cout << "DipolarStrengthToExchangeRatio = " << ratio <<endl;
-//    cout << "Jxx1p = "  << endl << Jxx1p <<endl;
+    cout << "Jxx1p = "  << endl << Jxx1p(seq(0, 10)) <<endl;
     Jxx1p = (Jxx1p.array() * ratio).eval();
-    Jxy1p = (Jxx1p.array() * ratio).eval();
-    Jyy1p = (Jxx1p.array() * ratio).eval();
-    Jzz1p = (Jxx1p.array() * ratio).eval();
+    Jxy1p = (Jxy1p.array() * ratio).eval();
+    Jyy1p = (Jyy1p.array() * ratio).eval();
+    Jzz1p = (Jzz1p.array() * ratio).eval();
+    cout << "Jxx1p = "  << endl << Jxx1p(seq(0, 10)) <<endl;
 
-    vector<int> NNVector;
-    int n = 1;
-    assert(n > 0 && n < DistanceVec1p.size());
-    for (int i = 1; i < N; ++i) {
-        double minDisi = getMinDistance(0, i);
-        if (minDisi < DistanceVec1p(n) || almostEquals(minDisi, DistanceVec1p(n))){
-            NNVector.push_back(i);
-        }
-    }
-    //ferromagnetic interacion
-    if (Prop.isExchangeInteractionCombinedWithJ) {
-        for (int i: NNVector) {
+    if (Prop.isExchangeInteractionCombinedWithDij) {
+        for (int i: NearestNeighbours) {
             Jxx1p(i) -= 1. / 2;  // TODO give reason why it gives correct results
             Jyy1p(i) -= 1. / 2;
             Jzz1p(i) -= 1. / 2;
         }
     }
 
-    VectorXi NNVectorEigen = Map<VectorXi> (NNVector.data(), NNVector.size());
+//    VectorXi NNVectorEigen = Map<VectorXi> (NNVector.data(), NNVector.size());
 //    cout << "Number of Nearest Neighbours  = " << NNVector.size()<< endl;
 //    cout << "NNVector = "<< endl << NNVectorEigen << endl;
 
@@ -1652,9 +1654,6 @@ void Lattice2d::setJmax1p() {
         double Jmax = eigensolver.eigenvalues().array().abs().maxCoeff();
 
         double ratio = 1;
-        if (Prop.isHavingExchangeInteraction){
-            ratio = Prop.DipolarStrengthToExchangeRatio;
-        }
         double r0j = getMinDistance(0, i);
         assert(r0j > 0);        // TODO set max prob using J interactions eigenvalues
         double lambda = 4.6 * ratio/(pow(r0j, 3)) / 4;
@@ -1697,12 +1696,14 @@ void Lattice2d::calcNeighboursbyNearGroupEnergyProportion(double proportion) {
     VectorXd JmaxCumulNormalizedVec;
     const int lastJmaxCumulVecIndex = JmaxCumulVec.size()-1;
     JmaxCumulNormalizedVec = JmaxCumulVec / JmaxCumulVec(lastJmaxCumulVecIndex);
+    JmaxCumulNormalizedVecToSave = JmaxCumulNormalizedVec;
     const auto lastNeighbourIterator = std::upper_bound(JmaxCumulNormalizedVec.begin(),
                                                     JmaxCumulNormalizedVec.end(),
                                                     proportion);
     const int lastNeighbourIndex = std::distance(JmaxCumulNormalizedVec.begin(),
                                                  lastNeighbourIterator);
     assert(lastNeighbourIndex > 0 && lastNeighbourIndex < JmaxCumulNormalizedVec.size());
+    cout << "JmaxCumulNormalizedVec = " << endl << JmaxCumulNormalizedVec(seq(0, min(16L, JmaxCumulNormalizedVec.size()-1)))  << endl;
 
 
     double minDisi = getMinDistance(0, PByDistance(lastNeighbourIndex));
@@ -1711,12 +1712,14 @@ void Lattice2d::calcNeighboursbyNearGroupEnergyProportion(double proportion) {
                                                         minDisi);
     const int lastNeighbourByDistanceIndex = std::distance(DistanceVec1p.begin(),
                                                            lastNeighbourByDistanceIterator);
+    cout << "Near group Distance = " << DistanceVec1p(lastNeighbourByDistanceIndex) << endl;
+    cout << "Maximum Distance = " << DistanceVec1p(last) << endl;
     assert(lastNeighbourByDistanceIndex > 0 && lastNeighbourByDistanceIndex < DistanceVec1p.size());
     calcNeighbours(lastNeighbourByDistanceIndex);
 
 
 // TODO  assertion assert(almostEquals(dErot(i),dENN(i))); fails when lastNeighbourIndex does not contain
-// all particles of same distance. e.g. it dows not fail when number of neghbours is 4, 8 for square lattice but fails
+// all particles of same distance. e.g. it does not fail when number of neghbours is 4, 8 for square lattice but fails
 // when its 7, 6
 //    Neighbours = PByDistance(seq(0, lastNeighbourIndex));
 //    std::sort(Neighbours.begin(), Neighbours.end());
@@ -1735,6 +1738,97 @@ void Lattice2d::calcNeighboursbyNearGroupEnergyProportion(double proportion) {
 
     cout << "size of Neighbours = " << Neighbours.size() << endl;
 //    cout << "Neighbours = " << Neighbours << endl;
+}
+
+void Lattice2d::calcNeighboursbyDistannce(double Distance){
+    VectorXd JmaxCumulVec;
+    JmaxCumulVec.setZero(JmaxByDistance.size());
+    JmaxCumulVec(0) = JmaxByDistance(0);
+    for (int i = 1; i < JmaxByDistance.size(); ++i) {
+        JmaxCumulVec(i) = JmaxCumulVec(i - 1) + JmaxByDistance(i);
+    }
+    VectorXd JmaxCumulNormalizedVec;
+    const auto lastJmaxCumulVecIndex = JmaxCumulVec.size()-1;
+    JmaxCumulNormalizedVec = JmaxCumulVec / JmaxCumulVec(lastJmaxCumulVecIndex);
+    JmaxCumulNormalizedVecToSave = JmaxCumulNormalizedVec;
+    cout << "JmaxCumulNormalizedVec = " << endl << JmaxCumulNormalizedVec(seq(0, min(16L, JmaxCumulNormalizedVec.size()-1)))  << endl;
 
 
+    const auto lastNeighbourByDistanceIterator = std::upper_bound(DistanceVec1p.begin(),
+                                                                  DistanceVec1p.end(),
+                                                                  Distance);
+    const auto lastNeighbourByDistanceIndex = std::distance(DistanceVec1p.begin(),
+                                                           lastNeighbourByDistanceIterator);
+    rassert(lastNeighbourByDistanceIndex > 0 && lastNeighbourByDistanceIndex < DistanceVec1p.size());
+
+    cout << "Near group Distance = " << DistanceVec1p(lastNeighbourByDistanceIndex) << endl;
+    cout << "Maximum Distance = " << DistanceVec1p(last) << endl;
+    if (lastNeighbourByDistanceIterator == DistanceVec1p.end()){
+        cout << "Near neighbours group is the size of whole lattice, try Metropolis method" <<endl;
+        rassert(false);
+    }
+    calcNeighbours(lastNeighbourByDistanceIndex);
+
+    cout << "size of Neighbours = " << Neighbours.size() << endl;
+//    cout << "Neighbours = " << Neighbours << endl;
+}
+
+void Lattice2d::setBoxes() {
+    rassert(L1 % Prop.LBox == 0);
+    NBx = L1 / Prop.LBox;
+    NBy = L2 / Prop.LBox;
+    NBoxes = NBx * NBy;
+    BoxSize = Prop.LBox * Prop.LBox;
+    XBoxes.setZero(NBoxes);
+    YBoxes.setZero(NBoxes);
+    BoxesIdxToPIdx.setZero(NBoxes);
+    for (int ib = 0; ib < NBoxes; ++ib) {
+        XBoxes(ib) = (ib % NBx) * Prop.LBox;
+        YBoxes(ib) = (ib / NBx) * Prop.LBox;
+        BoxesIdxToPIdx(ib) = XBoxes(ib) + L1 * YBoxes(ib);
+    }
+    cout << "XBoxes = " << endl << XBoxes(seq(0, min(10L, XBoxes.size()-1))) <<endl;
+    cout << "YBoxes = " << endl << YBoxes(seq(0, min(10L, YBoxes.size()-1)))  <<endl;
+
+    BoxIndices.setZero(BoxSize);
+
+    PByDistance.setZero(NBoxes - 1);
+    XPByDistance.setZero(NBoxes - 1);
+    YPByDistance.setZero(NBoxes - 1);
+    R0jBydistance.setZero(NBoxes - 1);
+    for (int j = 1; j < NBoxes; ++j) {
+        PByDistance(j - 1) = BoxesIdxToPIdx(j);
+        XPByDistance(j - 1) = XBoxes(j);
+        YPByDistance(j - 1) = YBoxes(j);
+        R0jBydistance(j - 1) = getMinDistance(0, BoxesIdxToPIdx(j));
+    }
+    // sorting by distance from close to far
+    for (int i = 0; i < PByDistance.size(); ++i) {
+        for (int j = i; j < PByDistance.size(); ++j) {
+            if (R0jBydistance(j) < R0jBydistance(i)) {
+                swap(R0jBydistance(i), R0jBydistance(j));
+                swap(PByDistance(i), PByDistance(j));
+                swap(XPByDistance(i), XPByDistance(j));
+                swap(YPByDistance(i), YPByDistance(j));
+            }
+        }
+    }
+
+    cout << "PByDistance = " << endl << PByDistance(seq(0, min(10L, PByDistance.size()-1)))  << endl;
+    cout << "XPByDistance = " << endl << XPByDistance(seq(0, min(10L, XPByDistance.size()-1)))  << endl;
+    cout << "YPByDistance = " << endl << YPByDistance(seq(0, min(10L, YPByDistance.size())-1))  << endl;
+    cout << "R0jBydistance = " << endl << R0jBydistance(seq(0, min(10L, R0jBydistance.size()-1)))  << endl;
+
+}
+
+void Lattice2d::getIndicesInsideBox(int Pidx) const{ // Pidx is respective particle index of a box
+    assert(Pidx < N);
+    assert(BoxIndices.size() == BoxSize);
+    int k = 0;
+    for (int i = 0; i < Prop.LBox; ++i) {
+        for (int j = 0; j < Prop.LBox; ++j) {
+            BoxIndices(k) = Pidx + i + (j * L1);
+            k++;
+        }
+    }
 }

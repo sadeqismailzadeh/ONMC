@@ -238,6 +238,18 @@ public:
     int64_t EIncreaserReducerTotalSum;
     int64_t attemptSum;
     int64_t FineTuneNum;
+    int64_t complexitySum;
+    int64_t RNDGenerationSum;
+    int64_t complexityAcceptSum;
+    int64_t RNDGenerationAcceptSum;
+    int64_t complexityLocalSum;
+    int64_t RNDGenerationLocalSum;
+    VectorXd AcceptedBondsSum;
+    VectorXd SelectedBondsSum;
+    VectorXd SelectedBondsLocal;
+    int64_t AcceptSum;
+    int64_t TotalUpdateSum;
+    int64_t SCOReshuffleCounter;
     double Eold;
     // TODO save snapshot
 
@@ -258,6 +270,7 @@ public:
     void setId();
     void static resetLastInstanceIndex();
     void randomizeAllSpins();
+    void loadEquilibriumState();
     double dErot(int i);
     void run1MetropolisStep();
     void run1OverRelaxationStep();
@@ -280,12 +293,16 @@ public:
     void calcOrderParam();
     void setProbClockFar();
     void setProbClock();
+    void setProbClockBoxes();
     double dEij(int i, int j);
     double dENN(int i);
     double PRelFar(int jrej, int i, int xi, int yi, double InvOneMinusPHatOld);
     void run1ClockParticleFar(int i);
     double PRelOriginal(int jrej, int i, int xi, int yi, double InvOneMinusPHatOld);
+    double PRelBoxes(int jrej, int i, int xi, int yi, double InvOneMinusPHatOld);
+    vector<int> NearIndices;
     void run1ClockParticle(int i);
+    void run1ClockParticleBoxes(int i);
     void run1ClockParticleOriginal(int i);
     void run1ClockParticleWalker(int i);
     void cleanjrejVecBool(const vector<int> &jrejVecSmall);
@@ -373,11 +390,13 @@ public:
         double x, y;
         x = realDissym(gen);
         y = realDissym(gen);
+        RNDGenerationSum += 2;
         double r2 = x*x +y*y;
 
         while (r2 > 1.0){
             x = realDissym(gen);
             y = realDissym(gen);
+            RNDGenerationSum += 2;
             r2 = x*x +y*y;
         }
         double invr = 1.0/sqrt(r2);
@@ -442,6 +461,7 @@ public:
 
         double x = Ux(i) + sigma * gaussianDis(gen);
         double y = Uy(i) + sigma * gaussianDis(gen);
+        RNDGenerationSum += 2;
         double invr = 1.0 / sqrt(x*x +y*y);
         UiNewX = x * invr;
         UiNewY = y * invr;

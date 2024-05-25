@@ -112,16 +112,8 @@ double MC2d::getEnergyDirect() {
 
 
 void MC2d::validiatePjSCOPreset(int jrej, double invOneMinusPHatOld, SCOData& scoData) {
+    complexitySum += 1;
     assert(jrej >=0 && jrej < N-1);
-//    cout << "jrej from PRel = " << jrej << endl;
-//    int jper = Lat.PByDistance(jrej);    //jper is periodic
-//    int j = Lat.unperiodicParticle(jper, i);
-//    assert(j >=0 && j < N);
-//    assert(jper >=0 && jper < N);
-//    int jperback = Lat.periodicParticle(j, i);
-//    assert(jper == jperback);
-//    assert(almostEquals(Lat.getMinDistance(i,j), Lat.getMinDistance(0, jper)));
-//    double Phatj = ProbClock(jrej);
     assert(Lat.XPByDistance(jrej) + Lat.YPByDistance(jrej) * Lat.L1 == Lat.PByDistance(jrej));
     const int xjper = Lat.XPByDistance(jrej);
     const int yjper = Lat.YPByDistance(jrej);
@@ -131,42 +123,40 @@ void MC2d::validiatePjSCOPreset(int jrej, double invOneMinusPHatOld, SCOData& sc
     const int yj = (yj0 >= Lat.L1)? yj0 - Lat.L1 : yj0;
     int j2 = yj * Lat.L1 + xj;
     int jper =  yjper * Lat.L1 + xjper;
-//    assert(j2 == j);
-//    int jper = Lat.periodicParticle(j, i);
     assert(jper >=0 && jper < N);
     int i = scoData.i;
 
     double Hxij = Lat.Jxx1p(jper) * Ux(j2) + Lat.Jxy1p(jper) * Uy(j2);
     double Hyij = Lat.Jxy1p(jper) * Ux(j2) + Lat.Jyy1p(jper) * Uy(j2);
     double Eij = 2*(Ux(i) * Hxij + Uy(i) * Hyij);
-//    double Eij2 = 2*(Ux(i) * (Lat.Jxx1p(jper) * Ux(j2) + Lat.Jxy1p(jper) * Uy(j2)) +
-//                   Uy(i) * (Lat.Jxy1p(jper) * Ux(j2) + Lat.Jyy1p(jper) * Uy(j2)));
-//    assert(almostEquals(Eij, Eij2));
-//    assert(almostEquals(dE, dEij(i,j)));
-
-//    double Phatj = InvOneMinusPHatOld;
-//    double Pj = exp(-max(dEij(i,j), 0.)/Temperature);
     assert(almostEquals(InvTemperature, 1/Temperature));
     double dVStar = dVstarVec(jrej);
-    double Pj = exp(Eij * InvTemperature - dVStar);
-//    assert(invOneMinusPHatOld >= (1 - Pj));
-    assert(Pj >=0 && Pj <=1);
-    assert(almostEquals(Pj,  PjSCO(jrej, i, scoData.xi, scoData.yi)));
+    double OneMinusPj = - expm1(Eij * InvTemperature - dVStar);   // - expm1 = 1 - e^x
+    OneMinusPj = (OneMinusPj < 0.)? 0. : OneMinusPj;
+    if (1 - ProbClock(jrej) <= OneMinusPj){
+        cout << "1 - ProbClock(jrej) = " << 1 - ProbClock(jrej)<<  endl;
+        cout << "OneMinusPj = " << OneMinusPj << endl;
+        cout << "jrej = " << jrej << endl;
+    }
+    assert(1 - ProbClock(jrej) >= OneMinusPj);
+    assert(OneMinusPj >= 0. && OneMinusPj <= 1.);
+    assert(almostEquals(exp(Eij * InvTemperature - dVStar),  PjSCO(jrej, i, scoData.xi, scoData.yi)));
+    double prel = OneMinusPj * InVOneMinusProbClock(jrej);
+    assert(prel>=0 && prel <=1);
+    RNDGenerationSum += 1;
+    if (realDis(gen) <= prel) {
+        double EijNew = 2 * (UiNewX * Hxij + UiNewY * Hyij);
+        double OneMinusPjnew = - expm1(EijNew * InvTemperature - dVStar);
 
-
-    double EijNew = 2*(UiNewX * Hxij + UiNewY * Hyij);
-//        double EijNew2 = 2*(UiNewX * (Lat.Jxx1p(jper) * Ux(j2) + Lat.Jxy1p(jper) * Uy(j2)) +
-//                         UiNewY* (Lat.Jxy1p(jper) * Ux(j2) + Lat.Jyy1p(jper) * Uy(j2)));
-//        assert(almostEquals(EijNew, EijNew2));
-    double Pjnew = exp(EijNew * InvTemperature - dVStar);
-    scoData.OneMinusPjOldProd *= 1 - Pj;
-    scoData.OneMinusPjNewProd *= 1 - Pjnew;
-    scoData.Hxi += Hxij;
-    scoData.Hyi += Hyij;
-    if (Prop.isSCOMethodOverrelaxationBuiltIn){
-        scoData.Hxij.push_back(Hxij);
-        scoData.Hyij.push_back(Hyij);
-        scoData.jrejVec.push_back(jrej);
+        scoData.OneMinusPjOldProd *= OneMinusPj;
+        scoData.OneMinusPjNewProd *= OneMinusPjnew;
+        scoData.Hxi += Hxij;
+        scoData.Hyi += Hyij;
+        if (Prop.isSCOMethodOverrelaxationBuiltIn) {
+            scoData.Hxij.push_back(Hxij);
+            scoData.Hyij.push_back(Hyij);
+            scoData.jrejVec.push_back(jrej);
+        }
     }
 
 }
@@ -199,38 +189,24 @@ double MC2d::dESCOPreset(SCOData& scoData){
 }
 
 void MC2d::run1SCOPresetParicle(int i) {
-//    cout << "run1ClockParticle" <<endl;
     Debug_totali++;
     TotalRegularParticleSteps        += (!isOverrelaxing)? 1 : 0;
     TotalOverrelaxedParticleSteps    += ( isOverrelaxing)? 1 : 0;
     if (Prop.isNearGroup){
         if (!Prop.isSCOMethodNearGroupBuiltIn){
-            //        cout << "here" << endl;
             assert(almostEquals(dErot(i),dENN(i)));
             double dE = dErot(i);
-            //        cout << "here " << endl;
-            //         if (dE > 0 && realDis(gen) > exp(-dE * InvTemperature)){
+            RNDGenerationSum += 1;
             if (realDis(gen) > exp(-dE * InvTemperature)){
                 return;   // reject move
             }
         }
-//        cout << "jrej = " << jrej << endl;
     }
-//    const int i = intDis(gen); //sorted by Index
-//    const int i = Random(N); //sorted by Index
-//    const int xi = i % Lat.L1;
-//    const int yi = i / Lat.L1;
     const int xi = Lat.XPbyIndex(i);
     const int yi = Lat.YPbyIndex(i);
     SCOData scoData(i, xi, yi);
-//    scoData.i = i;
-//    scoData.xi = xi;
-//    scoData.yi = yi;
     assert(xi == i % Lat.L1);
     assert(yi == i / Lat.L1);
-//    randomizeUiNew();
-//    randomAdaptive(i);
-//    cout << "concensusProb(i) = " << concensusProb(i) << endl;
     vector<int> jrejVec;
     vector<double> PjVec;
 
@@ -240,20 +216,16 @@ void MC2d::run1SCOPresetParicle(int i) {
 
 
 
-//    cout << "jrejVec = " <<endl;
-//    for_each(jrejVec.begin(), jrejVec.end(), [](const auto& elem) { cout << elem << " "; });
-//    cout << endl;
-//    double dE = dESCO(jrejVec, i, xi, yi, PjVec);
     double dE = dESCOPreset(scoData);
-//    assert(almostEquals(dE, dE2));
+    RNDGenerationSum += 1;
     if (dE < 0 || (realDis(gen) < exp(-dE * InvTemperature))){
         AcceptedRegularParticleSteps     += (!isOverrelaxing)? 1 : 0;
         AcceptedOverrelaxedParticleSteps += ( isOverrelaxing)? 1 : 0;
         Debug_Iaccepted++;    // move accepted
-        updateField(i);
+        if (Prop.isNearGroup){
+            updateField(i);
+        }
         updateState(i);
-//        cout << "i = " << i << " accepted" <<endl;
-//        JrejSum(jrej)++;
     }
 }
 
@@ -272,12 +244,23 @@ void MC2d::run1SCOStepPreset() {
         calcAllFields();
     }
 
+    SCOReshuffleCounter += 1;
+    if (SCOReshuffleCounter >= Prop.SCOPresetReshuffleInterval){
+        run1SCOShuffle();
+        SCOReshuffleCounter = 0;
+    }
+
     if (Prop.isOverRelaxationMethod) {
         if (Prop.isSCOMethodOverrelaxationBuiltIn && !Prop.isNearGroup){
-            run1SCOShuffle();
-            for (int j = 0; j < 10; ++j) {
-//                for (int c = 0; c < N; ++c) {
-//                    int i = intDis(gen);
+            isOverrelaxing = true;
+            for (int j = 0; j < Prop.OverrelaxationSteps; ++j) {
+                for (int i = 0; i < N; ++i) {
+                    randomizeUiNew();
+                    run1SCOPresetParicle(i);
+                }
+            }
+            isOverrelaxing = false;
+            for (int j = 0; j < Prop.MetropolisSteps; ++j) {
                 for (int i = 0; i < N; ++i) {
                     randomizeUiNew();
                     run1SCOPresetParicle(i);
@@ -285,100 +268,70 @@ void MC2d::run1SCOStepPreset() {
             }
         } else if (Prop.isNearGroup) {
             isOverrelaxing = true;
-
-            for (int j = 0; j < 10; ++j) {
-                run1SCOShuffle();
-//            for (int i : ParticleListSorted) {
+            for (int j = 0; j < Prop.OverrelaxationSteps; ++j) {
                 for (int i = 0; i < N; ++i) {
                     overRelaxateUiNew(i);
                     run1SCOPresetParicle(i);
                 }
             }
             isOverrelaxing = false;
-            for (int j = 0; j < 1; ++j) {
-                run1SCOShuffle();
-                for (int c = 0; c < N; ++c) {
-                    int i = intDis(gen);
-//            for (int i = 0; i < N; ++i) {
+            for (int j = 0; j < Prop.MetropolisSteps; ++j) {
+                for (int i = 0; i < N; ++i) {
                     randomizeUiNew();
                     run1SCOPresetParicle(i);
                 }
             }
         }
     } else {
-        run1SCOShuffle();
-        for (int j = 0; j < 10; ++j) {
-//            for (int c = 0; c < N; ++c) {
-//                int i = intDis(gen);
+        isOverrelaxing = false;
+        for (int j = 0; j < Prop.MetropolisSteps; ++j) {
             for (int i = 0; i < N; ++i) {
                 randomizeUiNew();
                 run1SCOPresetParicle(i);
             }
         }
     }
-
-//    shuffle(ParticleList.begin(), ParticleList.end(), gen);
-//    for (int i : ParticleList) {
-//        randomizeUiNew();
-//        run1ClockParticle(i);
-//    }
-
-//    double RateAccepted = AdapticeCounterAcceptance / (cmax + 0.0);
-//    double sigma_temp = sigma * (0.9/(1.0 - RateAccepted));
-//    if(sigma_temp > 500.0) {
-//        sigma_temp = 500.0;
-//    }
-//    sigma = sigma_temp;
-
 }
 
 
 
 void MC2d::validiatePjSCOShuffle(int jrej, double invOneMinusPHatOld, SCOData &scoData) {
-    assert(jrej >=0 && jrej < N-1);
-//    cout << "jrej from PRel = " << jrej << endl;
-//    int jper = Lat.PByDistance(jrej);    //jper is periodic
-//    int j = Lat.unperiodicParticle(jper, i);
-//    assert(j >=0 && j < N);
+    complexitySum += 1;
+//    assert(jrej >=0 && jrej < N-1);
+//    assert(Lat.XPByDistance(jrej) + Lat.YPByDistance(jrej) * Lat.L1 == Lat.PByDistance(jrej));
+//    const int xjper = Lat.XPByDistance(jrej);
+//    const int yjper = Lat.YPByDistance(jrej);
+//    const int xj0 = xjper + scoData.xi;
+//    const int yj0 = yjper + scoData.yi;
+//    const int xj = (xj0 >= Lat.L1)? xj0 - Lat.L1 : xj0;
+//    const int yj = (yj0 >= Lat.L1)? yj0 - Lat.L1 : yj0;
+//    int j2 = yj * Lat.L1 + xj;
+//    int jper =  yjper * Lat.L1 + xjper;
 //    assert(jper >=0 && jper < N);
-//    int jperback = Lat.periodicParticle(j, i);
-//    assert(jper == jperback);
-//    assert(almostEquals(Lat.getMinDistance(i,j), Lat.getMinDistance(0, jper)));
-//    double Phatj = ProbClock(jrej);
-    assert(Lat.XPByDistance(jrej) + Lat.YPByDistance(jrej) * Lat.L1 == Lat.PByDistance(jrej));
-    const int xjper = Lat.XPByDistance(jrej);
-    const int yjper = Lat.YPByDistance(jrej);
-    const int xj0 = xjper + scoData.xi;
-    const int yj0 = yjper + scoData.yi;
-    const int xj = (xj0 >= Lat.L1)? xj0 - Lat.L1 : xj0;
-    const int yj = (yj0 >= Lat.L1)? yj0 - Lat.L1 : yj0;
-    int j2 = yj * Lat.L1 + xj;
-    int jper =  yjper * Lat.L1 + xjper;
-//    assert(j2 == j);
-//    int jper = Lat.periodicParticle(j, i);
-    assert(jper >=0 && jper < N);
     int i = scoData.i;
-
-    double Hxij = Lat.Jxx1p(jper) * Ux(j2) + Lat.Jxy1p(jper) * Uy(j2);
-    double Hyij = Lat.Jxy1p(jper) * Ux(j2) + Lat.Jyy1p(jper) * Uy(j2);
-    double Eij = 2*(Ux(i) * Hxij + Uy(i) * Hyij);
-//    double Eij2 = 2*(Ux(i) * (Lat.Jxx1p(jper) * Ux(j2) + Lat.Jxy1p(jper) * Uy(j2)) +
-//                   Uy(i) * (Lat.Jxy1p(jper) * Ux(j2) + Lat.Jyy1p(jper) * Uy(j2)));
-//    assert(almostEquals(Eij, Eij2));
-//    assert(almostEquals(dE, dEij(i,j)));
-
-//    double Phatj = InvOneMinusPHatOld;
-//    double Pj = exp(-max(dEij(i,j), 0.)/Temperature);
-    assert(almostEquals(InvTemperature, 1/Temperature));
-    double dVStar = dVstarVec(jrej);
-    double Pj = exp(Eij * InvTemperature - dVStar);
-    assert(invOneMinusPHatOld >= (1 - Pj));
-    assert(Pj >=0 && Pj <=1);
-    assert(almostEquals(Pj,  PjSCO(jrej, i, scoData.xi, scoData.yi)));
-    double prel = (1 - Pj) * invOneMinusPHatOld;
-    if (realDis(gen) <= prel) {
+//
+//    double Hxij = Lat.Jxx1p(jper) * Ux(j2) + Lat.Jxy1p(jper) * Uy(j2);
+//    double Hyij = Lat.Jxy1p(jper) * Ux(j2) + Lat.Jyy1p(jper) * Uy(j2);
+//    double Eij = 2*(Ux(i) * Hxij + Uy(i) * Hyij);
+//    assert(almostEquals(InvTemperature, 1/Temperature));
+//    double dVStar = dVstarVec(jrej);
+////    double Pj = exp(Eij * InvTemperature - dVStar);
+//    assert(invOneMinusPHatOld >= (1 - Pj));
+//    assert(Pj >=0 && Pj <=1);
+//    assert(almostEquals(Pj,  PjSCO(jrej, i, scoData.xi, scoData.yi)));
+//    double Pj = ProbClock(jrej);
+//    double prel = (1 - Pj) * invOneMinusPHatOld;
+//    if (!(prel >= 0 && prel <= 1)){
+//        cout <<  " 1 / (1 - Pj) = " << 1 / (1 - Pj) << endl;
+//        cout <<  "invOneMinusPHatOld = " << invOneMinusPHatOld << endl;
+//        cout <<  "jrej = " << jrej << endl;
+//        cout <<  "prel = " << prel << endl;
+//    }
+//    assert(prel >= 0 && prel <= 1);
+//    RNDGenerationSum += 1;
+//    if (realDis(gen) <= prel) {
         jrejMat[i].push_back(jrej);
-    }
+//    }
 }
 
 
@@ -388,86 +341,91 @@ void MC2d::run1SCOShuffle(){
         jrejMat[i].clear();
         run1SCOShuffleParticle(i);
     }
-//    print(jrejMat);
 }
+
 
 void MC2d::run1SCOShuffleParticle(int i) {
-//    cout << "run1ClockParticle" <<endl;
+//    cout << "it is walker!"<<endl;
     int jrej = 0;     //jrej is sorted by distance and is periodic
-//    Debug_totali++;
+    int shift = 0;
     if (Prop.isNearGroup){
-        jrej = Lat.Neighbours.size();
-//        cout << "jrej = " << jrej << endl;
+        shift = Lat.Neighbours.size();
     }
-//    const int i = intDis(gen); //sorted by Index
-//    const int i = Random(N); //sorted by Index
-//    const int xi = i % Lat.L1;
-//    const int yi = i / Lat.L1;
+    Debug_totali++;
+    TotalRegularParticleSteps     += (!isOverrelaxing)? 1 : 0;
+    TotalOverrelaxedParticleSteps += ( isOverrelaxing)? 1 : 0;
+
+
     const int xi = Lat.XPbyIndex(i);
     const int yi = Lat.YPbyIndex(i);
-    SCOData scoData(i, xi, yi);
-//    scoData.i = i;
-//    scoData.xi = xi;
-//    scoData.yi = yi;
     assert(xi == i % Lat.L1);
     assert(yi == i / Lat.L1);
-//    randomizeUiNew();
-//    randomAdaptive(i);
-//    cout << "concensusProb(i) = " << concensusProb(i) << endl;
+
+    SCOData scoData(i, xi, yi);
+
     vector<int> jrejVec;
     vector<double> PjVec;
-    double nu = realDis(gen);
-//    double nu = Random();
-    double invOneMinusPHatOld = InVOneMinusProbClock(jrej);
-    assert(int(floor(log(nu)/log(ProbClock(jrej)))) == int(log(nu)/log(ProbClock(jrej))));
-//    jrej = jrej + floor(log(nu)/log(ProbClock(jrej)));
-    assert(almostEquals(InVLogProbClock(jrej), 1 / log(ProbClock(jrej))));
-    jrej = jrej + (log(nu) * InVLogProbClock(jrej));
 
-    while(true){
-//        jrej = jrej + (1 + log(nu)/log(ProbClock(jrej)));
-//        cout << "jrej = " <<  jrej <<endl;
-//        assert((jrej >= 0 && jrej < N-2));
-//        assert(ProbOld <= ProbClock(jrej));
-        if (jrej > Lat.PByDistance.size() - 1){ // there is totally N-1 bouds indexed from 0. so the index of the last bond is N-2
-//            Debug_Iaccepted++;    // move accepted
-//            updateState(i);
-//            AdapticeCounterAcceptance++;
-//            cout << "i = " << i << " accepted" <<endl;
-            break;
-        } else  {
-//            double Pj = PjSCO(jrej, i, xi, yi);
-//            assert(invOneMinusPHatOld >= (1 - Pj));
-//            assert(Pj >=0 && Pj <=1);
-//            double prel = (1 - Pj) * invOneMinusPHatOld;
-            validiatePjSCOShuffle(jrej, invOneMinusPHatOld, scoData);
-//            if (realDis(gen) <= prel){
-//                jrejVec.push_back(jrej);
-//                PjVec.push_back(Pj);
-//            }
+
+    vector<int> jrejVecSmall;
+    double RandomPoisson = PoissonDis(gen);
+    RNDGenerationSum += 1;
+    for (int j = 0; j < RandomPoisson; ++j) {
+        jrej = WalkerSampler(gen) + shift;
+        RNDGenerationSum += 1;
+        if (jrejVecBool[jrej]){
+            continue;
         }
+        jrejVecBool[jrej] = true;
+        jrejVecSmall.push_back(jrej);
 
+        double invOneMinusPhat = InVOneMinusProbClock(jrej);
+        validiatePjSCOShuffle(jrej, invOneMinusPhat, scoData);
         NumResampled++;
-        assert(jrej >=0 && jrej < N-1);
-        nu = realDis(gen);
-//        nu = Random();
-//        ProbOld = ProbClock(jrej);
-        invOneMinusPHatOld = InVOneMinusProbClock(jrej);
-//        assert(almostEquals(InVOneMinusProbClock(jrej), 1/(1 - ProbOld)));
-        assert(almostEquals(InVLogProbClock(jrej), 1 / log(ProbClock(jrej))));
-        assert(int(floor(log(nu)/log(ProbClock(jrej)))) == int(log(nu)/log(ProbClock(jrej))));
-//        jrej = jrej + floor(1 + log(nu) * InVLogProbClock(jrej));
-        jrej = jrej + (1 + log(nu) * InVLogProbClock(jrej));
     }
+    cleanjrejVecBool(jrejVecSmall);
 }
+
+
+//void MC2d::run1SCOShuffleParticle(int i) {
+//    int jrej = 0;     //jrej is sorted by distance and is periodic
+//    if (Prop.isNearGroup){
+//        jrej = Lat.Neighbours.size();
+//    }
+//    const int xi = Lat.XPbyIndex(i);
+//    const int yi = Lat.YPbyIndex(i);
+//    SCOData scoData(i, xi, yi);
+//    assert(xi == i % Lat.L1);
+//    assert(yi == i / Lat.L1);
+//    vector<int> jrejVec;
+//    vector<double> PjVec;
+//    RNDGenerationSum += 1;
+//    double nu = realDis(gen);
+//    double invOneMinusPHatOld = InVOneMinusProbClock(jrej);
+//    assert(int(floor(log(nu)/log(ProbClock(jrej)))) == int(log(nu)/log(ProbClock(jrej))));
+//    assert(almostEquals(InVLogProbClock(jrej), 1 / log(ProbClock(jrej))));
+//    jrej = jrej + (log(nu) * InVLogProbClock(jrej));
+//
+//    while(true){
+//        if (jrej > Lat.PByDistance.size() - 1){ // there is totally N-1 bouds indexed from 0. so the index of the last bond is N-2
+//            break;
+//        } else  {
+//            validiatePjSCOShuffle(jrej, invOneMinusPHatOld, scoData);
+//        }
+//
+//        NumResampled++;
+//        assert(jrej >=0 && jrej < N-1);
+//        RNDGenerationSum += 1;
+//        nu = realDis(gen);
+//        invOneMinusPHatOld = InVOneMinusProbClock(jrej);
+//        assert(almostEquals(InVLogProbClock(jrej), 1 / log(ProbClock(jrej))));
+//        assert(int(floor(log(nu)/log(ProbClock(jrej)))) == int(log(nu)/log(ProbClock(jrej))));
+//        jrej = jrej + (1 + log(nu) * InVLogProbClock(jrej));
+//    }
+//}
 
 
 void MC2d::setProbTomita() {
-//    cout << "setProbClock" <<endl;
-//    ProbClock.setZero();  //TODO rename ProbClock to ProbMax
-//    InVLogProbClock.setZero();
-//    InVOneMinusProbClock.setZero();
-//    dVstarVec.setZero();
     double ratio = 1;
     double lambdaTot = 0;
     alphaTilde = Prop.TomitaAlphaTilde;
@@ -475,9 +433,6 @@ void MC2d::setProbTomita() {
     kappa = alphaTilde / (1 + alphaTilde);
     invKappa = 1 / kappa;
 
-    if (Prop.isHavingExchangeInteraction){
-        ratio = Prop.DipolarStrengthToExchangeRatio;
-    }
     lambdaVec.clear();
     gammaVec.clear();
     alphaVec.clear();
@@ -486,34 +441,14 @@ void MC2d::setProbTomita() {
     for (int j = 0; j < ProbClock.size(); ++j) {
         double r0j = Lat.R0jBydistance(j);
         assert(r0j > 0);        // TODO set max prob using J interactions eigenvalues
-//        double gamma = 8.6 * ratio / (Temperature * pow(r0j, 3));
         double gamma = 4*ratio*Lat.JmaxByDistance(j) /Temperature ;
-//        double gammaNew = 2*Lat.JmaxByDistance(j) /Temperature ;
-//        assert(gammaNew < gamma);
-//        assert(gammaNew > gamma/2);
-
         double alpha = gamma * alphaTilde;
-//        ProbClock(j) = exp(- lambda);  //exp(-2*beta*2/r^3)
-//        InVLogProbClock(j) = 1 / log(ProbClock(j));  //exp(-2*beta*2/r^3)
-//        InVOneMinusProbClock(j) = 1 / (1 - ProbClock(j));  //exp(-2*beta*2/r^3)
-//        lambdaTot += lambda;
         gammaVec.push_back(gamma);
         alphaVec.push_back(alpha);
         invAlphaVec.push_back(1/alpha);
         lambdaVec.push_back(gamma + alpha);
         invLambdaVec.push_back(1/(gamma + alpha));
-//        gammaVec[j] = (gamma);
-//        alphaVec[j] = (alpha);
-//        invAlphaVec[j] = (1/alpha);
-//        lambdaVec[j] = (gamma + alpha);
-//        invLambdaVec[j] = (1/(gamma + alpha));
     }
-//    cout << "ProbClockNN = " << ProbClock(0) << endl <<endl;
-//    cout << "ProbClock = " << ProbClock(seq(1,min(5L, ProbClock.size()-1)))  << endl <<endl;
-//    cout << "ProbClock.prod() = " << ProbClock(seq(1, last)).prod() << endl;
-//    cout << "p(0) = " << ProbClock(0) << endl;
-//    cout << "lambda(0) = " << -log(ProbClock(0)) << endl;
-//    cout << "pow(p(1), Nfar) = " << pow(ProbClock(1), ProbClock.size() - 1) << endl;
 
 
 
@@ -525,48 +460,40 @@ void MC2d::setProbTomita() {
         invLambdaVec.erase(invLambdaVec.begin(), invLambdaVec.begin() + Lat.Neighbours.size());
     }
     WalkerSampler.set(lambdaVec);
-//    lambdaTot = std::reduce(lambdaVec.begin(), lambdaVec.end());
     lambdaTot = std::accumulate(lambdaVec.begin(), lambdaVec.end(),
                                 decltype(lambdaVec)::value_type(0));
     PoissonDis = std::poisson_distribution<int>(lambdaTot); //TODO make this work for near neighbours as well
     cout << "lambdaTot = " << lambdaTot  <<endl;
-//    cout << "Random poisson = " << PoissonDis(gen)  <<endl;
 }
 
 void MC2d::run1TomitaParticle(int i) {
-//    cout << "run1ClockParticle" <<endl;
-//    int jrej = 0;     //jrej is sorted by distance and is periodic
     int shift = 0;
     double pflip = 1;
     Debug_totali++;
+    TotalUpdateSum++;
     TotalRegularParticleSteps     += (!isOverrelaxing)? 1 : 0;
     TotalOverrelaxedParticleSteps += ( isOverrelaxing)? 1 : 0;
     if (Prop.isNearGroup){
-        //        cout << "here" << endl;
-//        cout << "dErot(i) = " << dErot(i) <<endl;
-//        cout << "dENN(i) = " << dENN(i) <<endl;
         assert(almostEquals(dErot(i),dENN(i)));
         double dE = dErot(i);
         double pNear = exp(-dE * InvTemperature);
         pflip *= (Prop.isTomitaMethodNearGroupBuiltIn)? pNear : 1;
-//         if (dE > 0 && realDis(gen) > exp(-dE * InvTemperature)){
+        RNDGenerationSum += 1;
         if (!isOverrelaxing && !Prop.isTomitaMethodNearGroupBuiltIn && dE > 0 && realDis(gen) > pNear){
             return;   // reject move
         }
         shift = Lat.Neighbours.size();
     }
-//    const int i = intDis(gen); //sorted by Index
-//    const int i = Random(N); //sorted by Index
-//    const int xi = i % Lat.L1;
-//    const int yi = i / Lat.L1;
     const int xi = Lat.XPbyIndex(i);
     const int yi = Lat.YPbyIndex(i);
     assert(xi == i % Lat.L1);
     assert(yi == i / Lat.L1);
 
     vector<int> jrejVecSmall;
+    RNDGenerationSum += 1;
     double RandomPoisson = PoissonDis(gen);
     for (int j = 0; j < RandomPoisson; ++j) {
+        RNDGenerationSum += 1;
         int jrejMinusShift = WalkerSampler(gen);
         int jrej = jrejMinusShift + shift;
         if (jrejVecRepeated[jrej] == 0){
@@ -587,6 +514,7 @@ void MC2d::run1TomitaParticle(int i) {
             double prel = (2*Beta*abs(Jtilde) + alpha) * invLambda;
             assert(prel>=0);
 //            for (int k = 0; k < power; ++k) {           //uncomment for no group
+                RNDGenerationSum += 1;
                 if (realDis(gen) <= prel){
                     pflip *= alpha / (2*Beta*abs(Jtilde) + alpha);
                 }
@@ -595,6 +523,7 @@ void MC2d::run1TomitaParticle(int i) {
             double prel = alpha * invLambda;
             assert(prel>=0);
 //            for (int k = 0; k < power; ++k) {           //uncomment for no group
+                RNDGenerationSum += 1;
                 if (realDis(gen) <= prel) {
                     pflip *= (2*Beta*abs(Jtilde) + alpha) * invAlpha;
                 }
@@ -602,14 +531,7 @@ void MC2d::run1TomitaParticle(int i) {
         }
 
     }
-
-//    if (Prop.isTomitaMethodNearGroupBuiltIn){
-//        //        cout << "here" << endl;
-//        assert(almostEquals(dErot(i),dENN(i)));
-//        double dEnear = dErot(i);
-//        pflip *= exp(-dEnear * InvTemperature);
-//    }
-
+    RNDGenerationSum += 1;
     if (realDis(gen) <= pflip){
         Debug_Iaccepted++;    // move accepted
         AcceptedRegularParticleSteps     += (!isOverrelaxing)? 1 : 0;
@@ -618,7 +540,6 @@ void MC2d::run1TomitaParticle(int i) {
             updateField(i);
         }
         updateState(i);
-//        cout << "i = " << i << " accepted" <<endl;
     }
     cleanjrejVecRepeated(jrejVecSmall);
 }
@@ -641,7 +562,6 @@ void MC2d::run1TomitaStep() {
     if (Prop.isOverRelaxationMethod && Prop.isNearGroup) {
         isOverrelaxing = true;
         for (int j = 0; j < Prop.OverrelaxationSteps; ++j) {
-//            for (int i : ParticleListSorted) {
             for (int i = 0; i < N; ++i) {
                 overRelaxateUiNew(i);
                 run1TomitaParticle(i);
@@ -649,8 +569,6 @@ void MC2d::run1TomitaStep() {
         }
         isOverrelaxing = false;
         for (int j = 0; j < Prop.MetropolisSteps; ++j) {
-//            for (int c = 0; c < N; ++c) {
-//                int i = intDis(gen);
             for (int i = 0; i < N; ++i) {
                 randomizeUiNew();
                 run1TomitaParticle(i);
@@ -659,8 +577,6 @@ void MC2d::run1TomitaStep() {
     } else {
         isOverrelaxing = false;
         for (int j = 0; j < Prop.MetropolisSteps; ++j) {
-//            for (int c = 0; c < N; ++c) {
-//                int i = intDis(gen);
             for (int i = 0; i < N; ++i) {
                 randomizeUiNew();
                 run1TomitaParticle(i);
@@ -668,33 +584,11 @@ void MC2d::run1TomitaStep() {
         }
     }
 
-//    shuffle(ParticleList.begin(), ParticleList.end(), gen);
-//    for (int i : ParticleList) {
-//        randomizeUiNew();
-//        run1ClockParticle(i);
-//    }
-
-//    double RateAccepted = AdapticeCounterAcceptance / (cmax + 0.0);
-//    double sigma_temp = sigma * (0.9/(1.0 - RateAccepted));
-//    if(sigma_temp > 500.0) {
-//        sigma_temp = 500.0;
-//    }
-//    sigma = sigma_temp;
-
 }
 
 double MC2d::dEijrej(int jrej, int i, int xi, int yi){  // jrej is sorted by distance and is periodic
-//    cout << "PRel" <<endl;
     assert(jrej >=0 && jrej < N-1);
-//    cout << "jrej from PRel = " << jrej << endl;
-//    int jper = Lat.PByDistance(jrej);    //jper is periodic
-//    int j = Lat.unperiodicParticle(jper, i);
-//    assert(j >=0 && j < N);
-//    assert(jper >=0 && jper < N);
-//    int jperback = Lat.periodicParticle(j, i);
-//    assert(jper == jperback);
-//    assert(almostEquals(Lat.getMinDistance(i,j), Lat.getMinDistance(0, jper)));
-//    double Phatj = ProbClock(jrej);
+    complexitySum += 1;
     assert(Lat.XPByDistance(jrej) + Lat.YPByDistance(jrej) * Lat.L1 == Lat.PByDistance(jrej));
     const int xjper = Lat.XPByDistance(jrej);
     const int yjper = Lat.YPByDistance(jrej);
@@ -704,10 +598,8 @@ double MC2d::dEijrej(int jrej, int i, int xi, int yi){  // jrej is sorted by dis
     const int yj = (yj0 >= Lat.L1)? yj0 - Lat.L1 : yj0;
     int j2 = yj * Lat.L1 + xj;
     int jper =  yjper * Lat.L1 + xjper;
-//    assert(j2 == j);
     const double dMx = UiNewX - Ux(i);
     const double dMy = UiNewY - Uy(i);
-//    int jper = Lat.periodicParticle(j, i);
     assert(jper >=0 && jper < N);
     double dE = 2*(dMx * (Lat.Jxx1p(jper) * Ux(j2) + Lat.Jxy1p(jper) * Uy(j2)) +
                    dMy * (Lat.Jxy1p(jper) * Ux(j2) + Lat.Jyy1p(jper) * Uy(j2)));
@@ -715,17 +607,8 @@ double MC2d::dEijrej(int jrej, int i, int xi, int yi){  // jrej is sorted by dis
 }
 
 double MC2d::Jtildeijrej(int jrej, int i, int xi, int yi){  // jrej is sorted by distance and is periodic
-//    cout << "PRel" <<endl;
     assert(jrej >=0 && jrej < N-1);
-//    cout << "jrej from PRel = " << jrej << endl;
-//    int jper = Lat.PByDistance(jrej);    //jper is periodic
-//    int j = Lat.unperiodicParticle(jper, i);
-//    assert(j >=0 && j < N);
-//    assert(jper >=0 && jper < N);
-//    int jperback = Lat.periodicParticle(j, i);
-//    assert(jper == jperback);
-//    assert(almostEquals(Lat.getMinDistance(i,j), Lat.getMinDistance(0, jper)));
-//    double Phatj = ProbClock(jrej);
+    complexitySum += 1;
     assert(Lat.XPByDistance(jrej) + Lat.YPByDistance(jrej) * Lat.L1 == Lat.PByDistance(jrej));
     const int xjper = Lat.XPByDistance(jrej);
     const int yjper = Lat.YPByDistance(jrej);
@@ -735,10 +618,8 @@ double MC2d::Jtildeijrej(int jrej, int i, int xi, int yi){  // jrej is sorted by
     const int yj = (yj0 >= Lat.L1)? yj0 - Lat.L1 : yj0;
     int j2 = yj * Lat.L1 + xj;
     int jper =  yjper * Lat.L1 + xjper;
-//    assert(j2 == j);
     const double sigmax = (Ux(i) - UiNewX) * 0.5; //TODO make setters and getters for UiNew to avoid unintentional rewrite
     const double sigmay = (Uy(i) - UiNewY) * 0.5;
-//    int jper = Lat.periodicParticle(j, i);
     assert(jper >=0 && jper < N);
     double Jtilde = -2*(sigmax * (Lat.Jxx1p(jper) * Ux(j2) + Lat.Jxy1p(jper) * Uy(j2)) +
                         sigmay * (Lat.Jxy1p(jper) * Ux(j2) + Lat.Jyy1p(jper) * Uy(j2)));

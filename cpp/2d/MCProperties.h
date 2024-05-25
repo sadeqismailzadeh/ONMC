@@ -41,6 +41,7 @@ public:
     // simulation options
     bool isFieldOn; //TODO organize variables like the ones in prodMC
     bool isFiniteDiffSimulation;
+    Eigen::VectorXd TemperatureList;
     bool isEquidistantTemperatureInCriticalRegionSimulation;
     bool isHistogramSimulation;
     bool isSlowlyCoolingEquilibration;
@@ -55,30 +56,43 @@ public:
     bool isOverRelaxationMethod;
     bool isClockMethod;
     bool isNearGroup;
+    bool isBoxes;
+    bool isMergeNearBoxes;
+    int NumberOfMerges;
+    int LBox;
+    bool isCalcSelectedBondsProbability;
     bool isClockMethodOriginal;
     bool isWalkerAliasMethod;
     bool isSCOMethod;
     bool isSCOMethodOverrelaxationBuiltIn;
+    bool isSCOPureOverrelaxation;
     bool isSCOMethodNearGroupBuiltIn;
     bool isSCOMethodPreset;
+    int SCOPresetReshuffleInterval;
     double SCOMethodJmaxIncreaseFactor;
     bool isTomitaMethod;
     bool isTomitaMethodNearGroupBuiltIn;
+    bool isSaveEquilibriumState;
+    bool isLoadEquilibriumState;
+    bool isComplexityAccept;
     double TomitaAlphaTilde;
 //    bool isNearGroup;
     bool isLRONMethod;  //  long ranged O(N) method = click or sco or tomita
     bool isDipolesInitializedOrdered;
+    double InitialAlignment;
     bool isNoSelfEnergy;
     bool isStoreNeighboursForAllPariticles;
     bool isFixedSeed;
     bool isSaveSamplesToSepareteFolders;
     long seed;
     bool isHavingExchangeInteraction;
-    bool isExchangeInteractionCombinedWithJ;
+    bool isExchangeInteractionCombinedWithDij;
     double DipolarStrengthToExchangeRatio;
     int NthNeighbour;
     bool isNearGroupByMaxEnergyProportion;
     double NearGroupMaxEnergyProportion;
+    bool isNearGroupByDistance;
+    double NearGroupDistance;
     int MetropolisSteps;
     int OverrelaxationSteps;
     int TotalSteps;

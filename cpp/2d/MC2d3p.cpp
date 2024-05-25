@@ -44,7 +44,7 @@ MC2d::MC2d(const Lattice2d &lat, const int64_t &seed, const MCProperties  &prope
 //    Jself << Jxx(0,0), Jxy(0,0), Jxy(0,0), Jyy(0,0);
 
     //taking data
-    StatisticalData.setZero(1000, 23);
+    StatisticalData.setZero(1000, 25);
     LastTempIndex = 0;
 
     //eigenvectors

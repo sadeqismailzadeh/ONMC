@@ -211,7 +211,7 @@ void runSize(int FunctionParamLatticeSize, int FunctionParamDataTaking, char Fun
         Prop.PminCritical = 0.21;
     }
 
-
+    const double PI = acos(-1);
     // lattice properties
     Prop.LatticeType = ParamLatticeType;
 
@@ -238,10 +238,11 @@ void runSize(int FunctionParamLatticeSize, int FunctionParamDataTaking, char Fun
     Prop.isComputingCorrelationLength = false;
     Prop.isTakeSnapshot = false;
     Prop.isSaveEquilibrationTimeSeries = true;
-    Prop.isSaveDataTakingTimeSeriesInHistogramSimulation = false;
-    Prop.isSaveSampleStatData = false;
-    Prop.isSaveSamplesToSepareteFolders = false;
-    Prop.isDipolesInitializedOrdered = true;
+    Prop.isSaveDataTakingTimeSeriesInHistogramSimulation = true;
+    Prop.isSaveSampleStatData = true;
+    Prop.isSaveSamplesToSepareteFolders = true;
+    Prop.isDipolesInitializedOrdered = false;
+    Prop.InitialAlignment = PI/3;
     Prop.isNoSelfEnergy = true; // TODO self energy is not working for LRON methods yet. it neads  considering ith particle at the end of nieghboursVec
     Prop.isStoreNeighboursForAllPariticles = true;
     Prop.isFixedSeed = false;
@@ -274,7 +275,7 @@ void runSize(int FunctionParamLatticeSize, int FunctionParamDataTaking, char Fun
     Prop.NearGroupMaxEnergyProportion = 0.95;
     // optional exchange interaction
     Prop.isHavingExchangeInteraction = false;    // ALERT: for now only use with metroplois or method that use walker alias
-    Prop.isExchangeInteractionCombinedWithJ = false;
+    Prop.isExchangeInteractionCombinedWithDij = false;
     Prop.DipolarStrengthToExchangeRatio = 0.1;
 
     if (FunctionParamMethodType == 'm') {
@@ -380,9 +381,9 @@ int main(){
         // 0.8543};
 
         vector<double> TempVec{
-        0.848,
-        0.849,
-        0.850,};
+                0.848,
+                0.849,
+                0.850};
 //        vector<double> TempVec{
 //                0.847};
 //        std::reverse(TempVec.begin(), TempVec.end());
